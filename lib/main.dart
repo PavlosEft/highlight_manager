@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:ffmpeg_kit_flutter_video/ffprobe_kit.dart';
 
 // ==========================================
 // 1. DATA MODELS (Τα δεδομένα μας)
@@ -39,6 +41,7 @@ class Project {
   List<String> videoPaths;
   List<HighlightPhase> phases;
   DateTime createdAt;
+  double totalDuration;
 
   Project({
     required this.id,
@@ -46,6 +49,7 @@ class Project {
     required this.videoPaths,
     List<HighlightPhase>? phases,
     DateTime? createdAt,
+    this.totalDuration = 0.0,
   })  : phases = phases ?? [],
         createdAt = createdAt ?? DateTime.now();
 
@@ -55,6 +59,7 @@ class Project {
         'videoPaths': videoPaths,
         'phases': phases.map((e) => e.toJson()).toList(),
         'createdAt': createdAt.toIso8601String(),
+        'totalDuration': totalDuration,
       };
 
   factory Project.fromJson(Map<String, dynamic> json) => Project(
@@ -65,6 +70,7 @@ class Project {
             .map((e) => HighlightPhase.fromJson(e))
             .toList(),
         createdAt: DateTime.parse(json['createdAt']),
+        totalDuration: json['totalDuration']?.toDouble() ?? 0.0,
       );
 }
 
@@ -73,7 +79,7 @@ class Project {
 // ==========================================
 const Map<String, Map<String, String>> translations = {
   'el': {
-    'title': '🎬 Highlight Manager!',
+    'title': 'Highlight Manager',
     'no_projects': 'Δεν υπάρχουν projects ακόμα.\nΠάτα το \'+\' για να ξεκινήσεις!',
     'new_project': 'Νέο Project',
     'cancel': 'Ακύρωση',
@@ -85,9 +91,19 @@ const Map<String, Map<String, String>> translations = {
     'err_load': 'Σφάλμα φόρτωσης projects:',
     'err_save': 'Σφάλμα αποθήκευσης project:',
     'err_delete': 'Σφάλμα διαγραφής project:',
+    'add_videos': 'Προσθήκη Βίντεο',
+    'clear_all': 'Καθαρισμός',
+    'create_btn': 'ΔΗΜΙΟΥΡΓΙΑ',
+    'duplicate_title': 'Υπάρχον Project',
+    'duplicate_msg': 'Υπάρχει ήδη project με αυτά τα βίντεο ή όνομα. Θέλετε να δημιουργήσετε αντίγραφο;',
+    'yes': 'Ναι',
+    'no': 'Όχι',
+    'delete_confirm_title': 'Διαγραφή Project',
+    'delete_confirm_msg': 'Είστε σίγουροι ότι θέλετε να διαγράψετε αυτό το project; Η ενέργεια δεν αναιρείται.',
+    'duration': 'Συνολική Διάρκεια:',
   },
   'en': {
-    'title': '🎬 Highlight Manager!',
+    'title': 'Highlight Manager',
     'no_projects': 'No projects yet.\nTap \'+\' to get started!',
     'new_project': 'New Project',
     'cancel': 'Cancel',
@@ -99,8 +115,42 @@ const Map<String, Map<String, String>> translations = {
     'err_load': 'Error loading projects:',
     'err_save': 'Error saving project:',
     'err_delete': 'Error deleting project:',
+    'add_videos': 'Add Videos',
+    'clear_all': 'Clear All',
+    'create_btn': 'CREATE',
+    'duplicate_title': 'Existing Project',
+    'duplicate_msg': 'A project with these videos or name already exists. Create a copy?',
+    'yes': 'Yes',
+    'no': 'No',
+    'delete_confirm_title': 'Delete Project',
+    'delete_confirm_msg': 'Are you sure you want to delete this project? This action cannot be undone.',
+    'duration': 'Total Duration:',
   }
 };
+
+// ==========================================
+// 1.8 THEMES
+// ==========================================
+
+final lightTheme = ThemeData(
+  colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple, brightness: Brightness.light),
+  useMaterial3: true,
+  cardTheme: CardThemeData(
+    elevation: 2,
+    margin: const EdgeInsets.only(bottom: 12),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+  ),
+);
+
+final darkTheme = ThemeData(
+  colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple, brightness: Brightness.dark),
+  useMaterial3: true,
+  cardTheme: CardThemeData(
+    elevation: 2,
+    margin: const EdgeInsets.only(bottom: 12),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+  ),
+);
 
 // ==========================================
 // 2. BACKEND / STATE MANAGEMENT
@@ -110,6 +160,7 @@ class AppState extends ChangeNotifier {
   List<Project> projects = [];
   bool isLoading = true;
   String currentLang = 'en';
+  bool isDarkMode = false;
 
   String t(String key) => translations[currentLang]?[key] ?? key;
 
@@ -118,8 +169,25 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  void toggleTheme() async {
+    isDarkMode = !isDarkMode;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('isDarkMode', isDarkMode);
+    } catch (_) {}
+  }
+
   AppState() {
-    loadAllProjects();
+    _initApp();
+  }
+
+  Future<void> _initApp() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      isDarkMode = prefs.getBool('isDarkMode') ?? false;
+    } catch (_) {}
+    await loadAllProjects();
   }
 
   // Βρίσκει τον τοπικό φάκελο της εφαρμογής
@@ -189,27 +257,54 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  // Δημιουργία Νέου Project μέσω File Picker
-  Future<Project?> createNewProject(String name) async {
-    FilePickerResult? result = await FilePicker.platform.pickFiles(
-      type: FileType.video,
-      allowMultiple: true,
+  // Έλεγχος για διπλότυπα projects
+  bool hasDuplicateProject(String name, List<String> paths) {
+    return projects.any((p) {
+      if (p.name == name) return true;
+      if (p.videoPaths.length == paths.length) {
+        bool samePaths = true;
+        for (int i = 0; i < paths.length; i++) {
+          if (p.videoPaths[i] != paths[i]) samePaths = false;
+        }
+        if (samePaths) return true;
+      }
+      return false;
+    });
+  }
+
+  // Απευθείας δημιουργία Project μετά το Dialog
+  Future<Project> createProjectDirectly(String baseName, List<String> paths) async {
+    String finalName = baseName;
+    int counter = 1;
+    
+    // Στυλ Windows: Προσθήκη (1), (2) κλπ. αν το όνομα υπάρχει ήδη
+    while (projects.any((p) => p.name == finalName)) {
+      finalName = '$baseName ($counter)';
+      counter++;
+    }
+
+    double totalDur = 0.0;
+    for (String path in paths) {
+      try {
+        final session = await FFprobeKit.getMediaInformation(path);
+        final info = session.getMediaInformation();
+        if (info != null && info.getDuration() != null) {
+          totalDur += double.tryParse(info.getDuration()!) ?? 0.0;
+        }
+      } catch (e) {
+        debugPrint("Error reading duration for $path: $e");
+      }
+    }
+
+    final newProject = Project(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      name: finalName,
+      videoPaths: paths,
+      totalDuration: totalDur,
     );
 
-    if (result != null && result.paths.isNotEmpty) {
-      // Φιλτράρισμα null paths
-      List<String> validPaths = result.paths.whereType<String>().toList();
-      
-      final newProject = Project(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        name: name,
-        videoPaths: validPaths,
-      );
-
-      await saveProject(newProject);
-      return newProject;
-    }
-    return null;
+    await saveProject(newProject);
+    return newProject;
   }
 }
 
@@ -232,16 +327,191 @@ class HighlightManagerApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final state = Provider.of<AppState>(context);
     return MaterialApp(
       title: 'Highlight Manager',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData.dark(useMaterial3: true).copyWith(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.deepPurpleAccent,
-          brightness: Brightness.dark,
+      theme: lightTheme,
+      darkTheme: darkTheme,
+      themeMode: state.isDarkMode ? ThemeMode.dark : ThemeMode.light,
+      home: const HomeScreen(),
+    );
+  }
+}
+
+class NewProjectDialog extends StatefulWidget {
+  final AppState state;
+  const NewProjectDialog({super.key, required this.state});
+
+  @override
+  State<NewProjectDialog> createState() => _NewProjectDialogState();
+}
+
+class _NewProjectDialogState extends State<NewProjectDialog> {
+  final TextEditingController _nameController = TextEditingController();
+  final List<String> _selectedPaths = [];
+  bool _userEditedName = false;
+
+  void _pickFiles() async {
+    FilePickerResult? result = await FilePicker.platform.pickFiles(
+      type: FileType.video,
+      allowMultiple: true,
+    );
+
+    if (result != null && result.paths.isNotEmpty) {
+      setState(() {
+        for (String? path in result.paths) {
+          if (path != null && !_selectedPaths.contains(path)) {
+            _selectedPaths.add(path);
+          }
+        }
+        _updateAutoName();
+      });
+    }
+  }
+
+  void _updateAutoName() {
+    if (_userEditedName || _selectedPaths.isEmpty) return;
+    
+    List<String> baseNames = _selectedPaths.map((path) {
+      String fileName = path.split(RegExp(r'[\\/]')).last;
+      return fileName.replaceAll(RegExp(r'\.[^.]*$'), ''); // Αφαίρεση κατάληξης (π.χ. .mp4)
+    }).toList();
+
+    _nameController.text = baseNames.join(' + ');
+  }
+
+  void _attemptCreate() async {
+    if (_selectedPaths.isEmpty || _nameController.text.trim().isEmpty) return;
+    
+    final name = _nameController.text.trim();
+    final state = widget.state;
+
+    if (state.hasDuplicateProject(name, _selectedPaths)) {
+      bool? proceed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(state.t('duplicate_title'), style: const TextStyle(fontWeight: FontWeight.bold)),
+          content: Text(state.t('duplicate_msg')),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(state.t('no'))),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(state.t('yes'))),
+          ],
+        ),
+      );
+      if (proceed != true) return;
+    }
+
+    await state.createProjectDirectly(name, _selectedPaths);
+    if (mounted) Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = widget.state.t;
+    return AlertDialog(
+      title: Text(t('new_project'), style: const TextStyle(fontWeight: FontWeight.bold)),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 600),
+        child: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+            TextField(
+              controller: _nameController,
+              onChanged: (v) => _userEditedName = v.isNotEmpty,
+              decoration: InputDecoration(
+                hintText: t('example_hint'),
+                border: const OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                FilledButton.icon(
+                  onPressed: _pickFiles,
+                  icon: const Icon(Icons.folder_open),
+                  label: Text(t('add_videos')),
+                ),
+                const Spacer(),
+                if (_selectedPaths.isNotEmpty)
+                  TextButton.icon(
+                    onPressed: () {
+                      setState(() {
+                        _selectedPaths.clear();
+                        _userEditedName = false;
+                        _nameController.clear();
+                      });
+                    },
+                    icon: const Icon(Icons.clear, color: Colors.red),
+                    label: Text(t('clear_all'), style: const TextStyle(color: Colors.red)),
+                  )
+              ],
+            ),
+            const SizedBox(height: 16),
+            if (_selectedPaths.isNotEmpty)
+              Flexible(
+                child: Container(
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey.withOpacity(0.3)),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: ReorderableListView.builder(
+                    shrinkWrap: true,
+                    buildDefaultDragHandles: false,
+                    itemCount: _selectedPaths.length,
+                    onReorder: (oldIndex, newIndex) {
+                      setState(() {
+                        if (oldIndex < newIndex) newIndex -= 1;
+                        final item = _selectedPaths.removeAt(oldIndex);
+                        _selectedPaths.insert(newIndex, item);
+                        if (!_userEditedName) _updateAutoName();
+                      });
+                    },
+                    itemBuilder: (context, index) {
+                      final path = _selectedPaths[index];
+                      final fileName = path.split(RegExp(r'[\\/]')).last;
+                      return ReorderableDragStartListener(
+                        key: ValueKey(path),
+                        index: index,
+                        child: ListTile(
+                          leading: CircleAvatar(
+                            radius: 14,
+                            backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                            child: Text('${index + 1}', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onPrimaryContainer, fontWeight: FontWeight.bold)),
+                          ),
+                          title: Text(fileName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14)),
+                          trailing: IconButton(
+                            icon: Icon(Icons.delete_outline, size: 20, color: Theme.of(context).colorScheme.error),
+                            onPressed: () {
+                              setState(() {
+                                _selectedPaths.removeAt(index);
+                                if (!_userEditedName) _updateAutoName();
+                              });
+                            },
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              )
+          ],
         ),
       ),
-      home: const HomeScreen(),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(t('cancel')),
+        ),
+        FilledButton(
+          onPressed: _selectedPaths.isEmpty || _nameController.text.trim().isEmpty ? null : _attemptCreate,
+          style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.primary),
+          child: Text(t('create_btn')),
+        ),
+      ],
     );
   }
 }
@@ -250,44 +520,24 @@ class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
   void _showCreateProjectDialog(BuildContext context, AppState state) {
-    final TextEditingController nameController = TextEditingController();
-
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(state.t('new_project'), style: const TextStyle(fontWeight: FontWeight.bold)),
-        content: TextField(
-          controller: nameController,
-          decoration: InputDecoration(
-            hintText: state.t('example_hint'),
-            border: const OutlineInputBorder(),
-          ),
-          autofocus: true,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(state.t('cancel')),
-          ),
-          FilledButton(
-            onPressed: () async {
-              final name = nameController.text.trim();
-              if (name.isNotEmpty) {
-                Navigator.pop(context);
-                await state.createNewProject(name);
-              }
-            },
-            child: Text(state.t('select_video')),
-          ),
-        ],
-      ),
+      barrierDismissible: false,
+      builder: (context) => NewProjectDialog(state: state),
     );
   }
 
   Widget _buildProjectCard(BuildContext context, Project project, AppState state) {
+    String formatDuration(double totalSeconds) {
+      if (totalSeconds <= 0) return "--:--";
+      int h = totalSeconds ~/ 3600;
+      int m = ((totalSeconds % 3600) ~/ 60);
+      int s = (totalSeconds % 60).toInt();
+      if (h > 0) return "${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}";
+      return "${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}";
+    }
+
     return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: () {
@@ -302,10 +552,10 @@ class HomeScreen extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.deepPurpleAccent.withOpacity(0.2),
+                  color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.4),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.video_library, size: 32, color: Colors.deepPurpleAccent),
+                child: Icon(Icons.video_library, size: 32, color: Theme.of(context).colorScheme.primary),
               ),
               const SizedBox(width: 16),
               Expanded(
@@ -314,13 +564,35 @@ class HomeScreen extends StatelessWidget {
                   children: [
                     Text(project.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), maxLines: 1, overflow: TextOverflow.ellipsis),
                     const SizedBox(height: 6),
-                    Text('${project.videoPaths.length} ${state.t('video_files')}\n${state.t('updated')} ${project.createdAt.day}/${project.createdAt.month}/${project.createdAt.year}', style: const TextStyle(color: Colors.grey, fontSize: 13)),
+                    Text(
+                      '${project.videoPaths.length} ${state.t('video_files')} • ${state.t('duration')} ${formatDuration(project.totalDuration)}\n${state.t('updated')} ${project.createdAt.day}/${project.createdAt.month}/${project.createdAt.year}',
+                      style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 13, height: 1.4),
+                    ),
                   ],
                 ),
               ),
               IconButton(
-                icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                onPressed: () => state.deleteProject(project.id),
+                icon: Icon(Icons.delete_outline, color: Theme.of(context).colorScheme.error),
+                onPressed: () async {
+                  bool? confirm = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: Text(state.t('delete_confirm_title'), style: const TextStyle(fontWeight: FontWeight.bold)),
+                      content: Text(state.t('delete_confirm_msg')),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(state.t('no'))),
+                        FilledButton(
+                          onPressed: () => Navigator.pop(ctx, true),
+                          style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+                          child: Text(state.t('yes')),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (confirm == true) {
+                    state.deleteProject(project.id);
+                  }
+                },
               ),
             ],
           ),
@@ -340,9 +612,13 @@ class HomeScreen extends StatelessWidget {
         centerTitle: true,
         elevation: 2,
         actions: [
+          IconButton(
+            icon: Icon(state.isDarkMode ? Icons.wb_sunny : Icons.nightlight_round),
+            onPressed: state.toggleTheme,
+          ),
           TextButton(
             onPressed: state.toggleLanguage,
-            child: Text(state.currentLang.toUpperCase(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+            child: Text(state.currentLang.toUpperCase(), style: TextStyle(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.bold, fontSize: 16)),
           ),
           const SizedBox(width: 8),
         ],
