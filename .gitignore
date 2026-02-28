@@ -1,0 +1,31 @@
+# --- Αρχεία που θέλεις να αγνοηθούν (Junk/Backups) ---
+*.zip
+Backups/
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+
+# --- IDE Configs (Αφαίρεση ρυθμίσεων επεξεργαστή) ---
+.idea/
+.vscode/
+*.iml
+*.iws
+.project
+
+# --- Αρχεία Συστήματος ---
+.DS_Store
+*.log
+
+# ==================================================
+# ΑΠΑΡΑΙΤΗΤΑ ΑΡΧΕΙΑ (Αυτά που ΔΕΝ πρέπει να γίνουν ignore)
+# Το Git θα κρατήσει:
+# 1. Τους φακέλους lib/ και tool/
+# 2. Τα αρχεία: pubspec.yaml, analysis_options.yaml, .metadata
+# 3. Τα platform folders: android/, ios/, web/, windows/, κλπ.
+# 4. Τα δικά σου scripts: start_dev.bat, zip_source_code.bat, AI_INSTRUCTIONS.txt
+# ==================================================
+
+# Σημείωση: Το pubspec.lock καλό είναι να κρατείται για να έχουν 
+# όλοι οι developers τις ίδιες εκδόσεις πακέτων.
