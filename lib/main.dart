@@ -69,12 +69,54 @@ class Project {
 }
 
 // ==========================================
+// 1.5 LOCALIZATION
+// ==========================================
+const Map<String, Map<String, String>> translations = {
+  'el': {
+    'title': '🎬 Highlight Manager!',
+    'no_projects': 'Δεν υπάρχουν projects ακόμα.\nΠάτα το \'+\' για να ξεκινήσεις!',
+    'new_project': 'Νέο Project',
+    'cancel': 'Ακύρωση',
+    'select_video': 'Επιλογή Βίντεο',
+    'example_hint': 'π.χ. Αγώνας Κυριακής',
+    'video_files': 'αρχεία βίντεο',
+    'updated': 'Ανανεώθηκε:',
+    'open_editor': 'Άνοιγμα Editor για:',
+    'err_load': 'Σφάλμα φόρτωσης projects:',
+    'err_save': 'Σφάλμα αποθήκευσης project:',
+    'err_delete': 'Σφάλμα διαγραφής project:',
+  },
+  'en': {
+    'title': '🎬 Highlight Manager!',
+    'no_projects': 'No projects yet.\nTap \'+\' to get started!',
+    'new_project': 'New Project',
+    'cancel': 'Cancel',
+    'select_video': 'Select Video',
+    'example_hint': 'e.g. Sunday Match',
+    'video_files': 'video files',
+    'updated': 'Updated:',
+    'open_editor': 'Opening Editor for:',
+    'err_load': 'Error loading projects:',
+    'err_save': 'Error saving project:',
+    'err_delete': 'Error deleting project:',
+  }
+};
+
+// ==========================================
 // 2. BACKEND / STATE MANAGEMENT
 // ==========================================
 
 class AppState extends ChangeNotifier {
   List<Project> projects = [];
   bool isLoading = true;
+  String currentLang = 'en';
+
+  String t(String key) => translations[currentLang]?[key] ?? key;
+
+  void toggleLanguage() {
+    currentLang = currentLang == 'el' ? 'en' : 'el';
+    notifyListeners();
+  }
 
   AppState() {
     loadAllProjects();
@@ -109,7 +151,7 @@ class AppState extends ChangeNotifier {
       // Ταξινόμηση από το πιο πρόσφατο στο παλαιότερο
       projects.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     } catch (e) {
-      debugPrint("Σφάλμα φόρτωσης projects: $e");
+      debugPrint("${t('err_load')} $e");
     }
 
     isLoading = false;
@@ -128,7 +170,7 @@ class AppState extends ChangeNotifier {
       }
       notifyListeners();
     } catch (e) {
-      debugPrint("Σφάλμα αποθήκευσης project: $e");
+      debugPrint("${t('err_save')} $e");
     }
   }
 
@@ -143,7 +185,7 @@ class AppState extends ChangeNotifier {
       projects.removeWhere((p) => p.id == id);
       notifyListeners();
     } catch (e) {
-      debugPrint("Σφάλμα διαγραφής project: $e");
+      debugPrint("${t('err_delete')} $e");
     }
   }
 
@@ -207,38 +249,82 @@ class HighlightManagerApp extends StatelessWidget {
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
-  void _showCreateProjectDialog(BuildContext context) {
+  void _showCreateProjectDialog(BuildContext context, AppState state) {
     final TextEditingController nameController = TextEditingController();
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Νέο Project', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: Text(state.t('new_project'), style: const TextStyle(fontWeight: FontWeight.bold)),
         content: TextField(
           controller: nameController,
-          decoration: const InputDecoration(
-            hintText: "π.χ. Αγώνας Κυριακής",
-            border: OutlineInputBorder(),
+          decoration: InputDecoration(
+            hintText: state.t('example_hint'),
+            border: const OutlineInputBorder(),
           ),
           autofocus: true,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Ακύρωση'),
+            child: Text(state.t('cancel')),
           ),
           FilledButton(
             onPressed: () async {
               final name = nameController.text.trim();
               if (name.isNotEmpty) {
-                Navigator.pop(context); // Κλείνουμε το dialog
-                final state = Provider.of<AppState>(context, listen: false);
+                Navigator.pop(context);
                 await state.createNewProject(name);
               }
             },
-            child: const Text('Επιλογή Βίντεο'),
+            child: Text(state.t('select_video')),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildProjectCard(BuildContext context, Project project, AppState state) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('${state.t('open_editor')} ${project.name}...')),
+          );
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.deepPurpleAccent.withOpacity(0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.video_library, size: 32, color: Colors.deepPurpleAccent),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(project.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), maxLines: 1, overflow: TextOverflow.ellipsis),
+                    const SizedBox(height: 6),
+                    Text('${project.videoPaths.length} ${state.t('video_files')}\n${state.t('updated')} ${project.createdAt.day}/${project.createdAt.month}/${project.createdAt.year}', style: const TextStyle(color: Colors.grey, fontSize: 13)),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                onPressed: () => state.deleteProject(project.id),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -246,66 +332,52 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = Provider.of<AppState>(context);
+    final isDesktop = MediaQuery.of(context).size.width > 600;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('🎬 Highlight Manager!', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: Text(state.t('title'), style: const TextStyle(fontWeight: FontWeight.bold)),
         centerTitle: true,
         elevation: 2,
+        actions: [
+          TextButton(
+            onPressed: state.toggleLanguage,
+            child: Text(state.currentLang.toUpperCase(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+          ),
+          const SizedBox(width: 8),
+        ],
       ),
       body: state.isLoading
           ? const Center(child: CircularProgressIndicator())
           : state.projects.isEmpty
-              ? const Center(
+              ? Center(
                   child: Text(
-                    "Δεν υπάρχουν projects ακόμα.\nΠάτα το '+' για να ξεκινήσεις!",
+                    state.t('no_projects'),
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 16, color: Colors.grey),
+                    style: const TextStyle(fontSize: 16, color: Colors.grey),
                   ),
                 )
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: state.projects.length,
-                  itemBuilder: (context, index) {
-                    final project = state.projects[index];
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      child: ListTile(
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        leading: Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: Colors.deepPurpleAccent.withOpacity(0.2),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(Icons.video_library, size: 28, color: Colors.deepPurpleAccent),
-                        ),
-                        title: Text(project.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                        subtitle: Padding(
-                          padding: const EdgeInsets.only(top: 4.0),
-                          child: Text('${project.videoPaths.length} αρχεία βίντεο\nΑνανεώθηκε: ${project.createdAt.day}/${project.createdAt.month}/${project.createdAt.year}'),
-                        ),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                          onPressed: () {
-                            state.deleteProject(project.id);
-                          },
-                        ),
-                        onTap: () {
-                          // Εδώ θα κάνουμε Navigate στην οθόνη του Editor στη Φάση 2
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Άνοιγμα Editor για: ${project.name}...')),
-                          );
-                        },
+              : isDesktop
+                  ? GridView.builder(
+                      padding: const EdgeInsets.all(24),
+                      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                        maxCrossAxisExtent: 400,
+                        crossAxisSpacing: 16,
+                        mainAxisSpacing: 16,
+                        childAspectRatio: 2.5,
                       ),
-                    );
-                  },
-                ),
+                      itemCount: state.projects.length,
+                      itemBuilder: (context, index) => _buildProjectCard(context, state.projects[index], state),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: state.projects.length,
+                      itemBuilder: (context, index) => _buildProjectCard(context, state.projects[index], state),
+                    ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showCreateProjectDialog(context),
+        onPressed: () => _showCreateProjectDialog(context, state),
         icon: const Icon(Icons.add),
-        label: const Text('Νέο Project', style: TextStyle(fontWeight: FontWeight.bold)),
+        label: Text(state.t('new_project'), style: const TextStyle(fontWeight: FontWeight.bold)),
       ),
     );
   }
