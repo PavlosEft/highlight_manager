@@ -3,6 +3,18 @@
 
 na ksanavalw to ffmpeg_kit_flutter_video
 
+στο μαύρο παράθυρο βγάζει κάτι αμπουρνέζικα στον τίτλο και λίγο στην αρχή και σε κάποια μηνύματα από μπροστά
+
+να προσθέσω στα instructions 
+- ότι φτιάχνουμε είναι κατευθείαν και για mobile 
+- όταν χρησιμοποιούνται διάφορα libraries οδηγίες σχετικά με τα license 
+- ότι φτιάχνουμε χρησιμοποιεί τη λειτουργία για multi language 
+- responsive όλες τις οθόνες κινητά και λοιπά
+- dark theme light theme
+- ui consistency 
+- όχι emoji 
+
+
 NEXT
 
 Φάση 2: Ενσωμάτωση του Video Player (χρησιμοποιώντας το media_kit, που είναι εξαιρετικό, cross-platform και safe για εμπορική χρήση) και στήσιμο του UI του Editor.
