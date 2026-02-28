@@ -5,7 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:ffmpeg_kit_flutter_video/ffprobe_kit.dart';
+import 'package:media_kit/media_kit.dart';
 
 // ==========================================
 // 1. DATA MODELS (Τα δεδομένα μας)
@@ -284,17 +284,22 @@ class AppState extends ChangeNotifier {
     }
 
     double totalDur = 0.0;
+    final player = Player();
+    
     for (String path in paths) {
       try {
-        final session = await FFprobeKit.getMediaInformation(path);
-        final info = session.getMediaInformation();
-        if (info != null && info.getDuration() != null) {
-          totalDur += double.tryParse(info.getDuration()!) ?? 0.0;
+        await player.open(Media(path), play: false);
+        // Περιμένουμε μέχρι να διαβαστεί η διάρκεια του βίντεο μέσω native API (κινητό ή υπολογιστής)
+        for (int i = 0; i < 20; i++) {
+          if (player.state.duration != Duration.zero) break;
+          await Future.delayed(const Duration(milliseconds: 100));
         }
+        totalDur += player.state.duration.inMilliseconds / 1000.0;
       } catch (e) {
         debugPrint("Error reading duration for $path: $e");
       }
     }
+    await player.dispose();
 
     final newProject = Project(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -314,6 +319,7 @@ class AppState extends ChangeNotifier {
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized();
   runApp(
     ChangeNotifierProvider(
       create: (context) => AppState(),
