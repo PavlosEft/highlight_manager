@@ -4,10 +4,18 @@ import 'dart:convert';
 
 Process? flutterProcess;
 bool isConfirmingUndo = false;
+bool isConfirmingBackup = false;
 
 void main() async {
   print('====================================================');
   print('🚀 HIGHLIGHT MANAGER - PRO DEV SERVER');
+  print('====================================================');
+  print('⌨️ ΣΥΝΤΟΜΕΥΣΕΙΣ ΠΛΗΚΤΡΟΛΟΓΙΟΥ:');
+  print('  [r] - Hot Reload: Εφαρμογή αλλαγών κώδικα ακαριαία.');
+  print('  [R] - Hot Restart: Πλήρης επανεκκίνηση της εφαρμογής.');
+  print('  [u] - Undo: Επαναφορά στην προηγούμενη έκδοση από το φάκελο Backups.');
+  print('  [b] - Backup: Δημιουργία μόνιμου Snapshot (OK) που δεν διαγράφεται.');
+  print('  [q] - Quit: Τερματισμός του Server και της εφαρμογής.');
   print('====================================================');
   
   // Διασφάλιση ότι υπάρχει ο φάκελος Backups
@@ -44,9 +52,23 @@ void main() async {
     }
   });
 
-  // Αρχικοποίηση clipboard (αγνόηση παλιών δεδομένων)
+  // Αρχικοποίηση clipboard και File Watcher
   String lastClipboard = await getClipboard();
-  
+  DateTime lastWatchEvent = DateTime.now();
+
+  // Αυτόματο Hot Reload & Backup με κάθε χειροκίνητη αποθήκευση στο lib/
+  Directory('lib').watch(recursive: true).listen((event) async {
+    if (isConfirmingUndo) return;
+    // Debounce 500ms για αποφυγή διπλών events
+    if (DateTime.now().difference(lastWatchEvent).inMilliseconds < 500) return;
+    lastWatchEvent = DateTime.now();
+
+    print('\n💾 [FILE WATCHER] Εντοπίστηκε αλλαγή στο: ${event.path}');
+    await manageZipsBeforePatch();
+    await createCurrentZip();
+    flutterProcess?.stdin.write('r');
+  });
+
   Timer.periodic(const Duration(seconds: 1), (timer) async {
     if (isConfirmingUndo) return;
 
