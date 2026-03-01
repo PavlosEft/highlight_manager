@@ -2,20 +2,27 @@ import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
 
-Process? flutterProcess;
+List<Process> flutterProcesses = [];
 bool isConfirmingUndo = false;
 bool isConfirmingGit = false;
+bool isConfirmingBrowser = false;
 bool isApplyingPatch = false;
 Timer? debounceTimer;
 
 void main() async {
   print('====================================================');
+  print('🧹 Καθαρισμός προηγούμενων διεργασιών...');
+  try {
+    // Κλείνει την εφαρμογή αν τρέχει ήδη στα Windows για να επιτρέψει το νέο build
+    await Process.run('taskkill', ['/F', '/IM', 'highlight_manager.exe', '/T'], runInShell: true);
+  } catch (_) {}
   print('HIGHLIGHT MANAGER - PRO DEV SERVER');
   print('====================================================');
   print('ΣΥΝΤΟΜΕΥΣΕΙΣ ΠΛΗΚΤΡΟΛΟΓΙΟΥ:');
   print('  [c] - Create (OK) Zip: Μόνιμο Snapshot έξω, χωρίς να διαγράφεται.');
   print('  [g] - Git Push: Αυτόματο add, commit και push.');
   print('  [u] - Undo: Επαναφορά στην προηγούμενη έκδοση από το φάκελο Backups.');
+  print('  [b] - Browser: Άνοιγμα της εφαρμογής στον Chrome (Web).');
   print('-----------------------------------------------------');
   print('  [r] - Hot Reload: Εφαρμογή αλλαγών κώδικα ακαριαία.');
   print('  [R] - Hot Restart: Πλήρης επανεκκίνηση της εφαρμογής.');
@@ -25,17 +32,36 @@ void main() async {
   final backupDir = Directory('Backups');
   if (!backupDir.existsSync()) backupDir.createSync();
 
-  // Αισθητήρες για το κλείσιμο του παραθύρου (π.χ. με Ctrl+C) για να κλείνει και το Flutter
+  // Αισθητήρες για το κλείσιμο του παραθύρου για να κλείνει και το Flutter
   ProcessSignal.sigint.watch().listen((_) {
-    flutterProcess?.kill();
+    for (var p in flutterProcesses) p.kill();
     exit(0);
   });
 
-  print('Ξεκινάει το Flutter...');
-  flutterProcess = await Process.start('flutter', ['run', '-d', 'windows'], runInShell: true);
+  print('Αναζήτηση διαθέσιμων συσκευών...');
+  final deviceResult = await Process.run('flutter', ['devices', '--machine'], runInShell: true);
+  final List<dynamic> devices = jsonDecode(deviceResult.stdout);
+  
+  List<String> targetIds = [];
 
-  flutterProcess!.stdout.transform(utf8.decoder).listen((data) => stdout.write(data));
-  flutterProcess!.stderr.transform(utf8.decoder).listen((data) => stderr.write(data));
+  for (var d in devices) {
+    final String id = d['id'] ?? '';
+    if (!(d['isSupported'] ?? false)) continue;
+
+    if (id == 'windows') {
+      targetIds.add(id);
+    } else if (id != 'chrome' && d['sdk'] != null && (d['sdk'].toString().contains('Android') || d['sdk'].toString().contains('iOS'))) {
+      targetIds.add(id);
+    }
+  }
+
+  for (var devId in targetIds) {
+    print('Εκκίνηση στη συσκευή: $devId');
+    final p = await Process.start('flutter', ['run', '-d', devId], runInShell: true);
+    flutterProcesses.add(p);
+    p.stdout.transform(utf8.decoder).listen((data) => stdout.write('[$devId] $data'));
+    p.stderr.transform(utf8.decoder).listen((data) => stderr.write('[$devId] $data'));
+  }
 
   try {
     stdin.lineMode = false;
@@ -55,9 +81,14 @@ void main() async {
       return;
     }
 
+    if (isConfirmingBrowser) {
+      handleBrowserConfirmation(input);
+      return;
+    }
+
     if (input == 'q') {
       print('\nΤερματισμός...');
-      flutterProcess?.kill();
+      for (var p in flutterProcesses) p.kill();
       exit(0);
     } else if (input == 'u') {
       isConfirmingUndo = true;
@@ -67,8 +98,11 @@ void main() async {
       stdout.write('\n⚠️ [GIT] Να γίνει αυτόματο commit και push; (y/n): ');
     } else if (input == 'c') {
       createOkZip();
+    } else if (input == 'b') {
+      isConfirmingBrowser = true;
+      stdout.write('\n⚠️ [BROWSER] Να ανοίξει η εφαρμογή και στον Chrome; (y/n): ');
     } else {
-      flutterProcess?.stdin.add(event);
+      for (var p in flutterProcesses) p.stdin.add(event);
     }
   });
 
@@ -85,7 +119,7 @@ void main() async {
       print('\n💾 [FILE WATCHER] Εντοπίστηκε αποθήκευση: ${event.path}');
       await manageZipsBeforePatch();
       await createCurrentZip();
-      flutterProcess?.stdin.write('r');
+      for (var p in flutterProcesses) p.stdin.write('r');
     });
   }
 
@@ -112,8 +146,8 @@ void main() async {
         await Future.delayed(const Duration(milliseconds: 300)); 
         await manageZipsBeforePatch();
         await createCurrentZip();
-        print('🔄 [AI PATCHER] Hot Reload...');
-        flutterProcess!.stdin.write('r'); 
+        print('[AI PATCHER] Hot Reload...');
+        for (var p in flutterProcesses) p.stdin.write('r');
       } else {
         print('⚠️ Η εφαρμογή ακυρώθηκε. Κανένα αρχείο ή Zip δεν πειράχτηκε.');
       }
@@ -131,7 +165,7 @@ Future<String> getClipboard() async {
       '-NoProfile',
       '-Command',
       '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-Clipboard -Raw'
-    ], stdoutEncoding: utf8);
+    ], stdoutEncoding: utf8, runInShell: true);
     return result.stdout.toString().trim();
   } catch (e) {
     return '';
@@ -160,7 +194,7 @@ Future<void> createCurrentZip() async {
 
   final args = ['-a', '-c', '-f', zipName, ...existingTargets];
   
-  final result = await Process.run('tar.exe', args);
+  final result = await Process.run('tar.exe', args, runInShell: true);
   
   if (result.exitCode == 0) {
     print('✅ Νέο Snapshot δημιουργήθηκε: $zipName');
@@ -180,7 +214,7 @@ Future<void> createOkZip() async {
 
   final args = ['-a', '-c', '-f', zipName, ...existingTargets];
   
-  final result = await Process.run('tar.exe', args);
+  final result = await Process.run('tar.exe', args, runInShell: true);
   
   if (result.exitCode == 0) {
     print('✅ [OK] Νέο Μόνιμο Snapshot δημιουργήθηκε επιτυχώς: $zipName');
@@ -213,15 +247,28 @@ void handleUndoConfirmation(String input) async {
       final fileName = lastZip.path.split(Platform.pathSeparator).last;
       
       await lastZip.rename(fileName);
-      await Process.run('tar.exe', ['-x', '-f', fileName]);
+      await Process.run('tar.exe', ['-x', '-f', fileName], runInShell: true);
       
-      print('⏪ Η επαναφορά ολοκληρώθηκε! (Αρχείο: $fileName)');
-      flutterProcess!.stdin.write('r');
+      print('Η επαναφορά ολοκληρώθηκε! (Αρχείο: $fileName)');
+      for (var p in flutterProcesses) p.stdin.write('r');
     }
   } else {
     print('\n🚫 Το Undo ακυρώθηκε.');
   }
   isConfirmingUndo = false;
+}
+
+void handleBrowserConfirmation(String input) async {
+  if (input == 'y') {
+    print('\n⏳ Εκκίνηση στον Chrome...');
+    final p = await Process.start('flutter', ['run', '-d', 'chrome', '--web-port', '8080'], runInShell: true);
+    flutterProcesses.add(p);
+    p.stdout.transform(utf8.decoder).listen((data) => stdout.write('[chrome] $data'));
+    p.stderr.transform(utf8.decoder).listen((data) => stderr.write('[chrome] $data'));
+  } else {
+    print('\n🚫 Το άνοιγμα στον Chrome ακυρώθηκε.');
+  }
+  isConfirmingBrowser = false;
 }
 
 void handleGitConfirmation(String input) async {
@@ -231,14 +278,14 @@ void handleGitConfirmation(String input) async {
     final timestamp = "${now.day}/${now.month}/${now.year} ${now.hour}:${now.minute}:${now.second}";
     
     // Προσθήκη όλων των αλλαγών
-    await Process.run('git', ['add', '.']);
+    await Process.run('git', ['add', '.'], runInShell: true);
     
     // Αυτόματο Commit
-    final commitResult = await Process.run('git', ['commit', '-m', 'Auto commit from dev server - $timestamp']);
+    final commitResult = await Process.run('git', ['commit', '-m', 'Auto commit from dev server - $timestamp'], runInShell: true);
     print(commitResult.stdout);
     
     // Push
-    final pushResult = await Process.run('git', ['push']);
+    final pushResult = await Process.run('git', ['push'], runInShell: true);
     if (pushResult.exitCode == 0) {
       print('✅ [GIT] Το Push ολοκληρώθηκε με επιτυχία!');
     } else {

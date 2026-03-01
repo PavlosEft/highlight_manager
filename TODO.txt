@@ -5,6 +5,8 @@
 
 NEXT
 
+Φάση 1: ανάλυση βίντεο με βάση το παλιό project
+
 Φάση 2: Ενσωμάτωση του Video Player (χρησιμοποιώντας το media_kit, που είναι εξαιρετικό, cross-platform και safe για εμπορική χρήση) και στήσιμο του UI του Editor.
 
 Φάση 3: Ανάλυση Ήχου (Audio Processing). Εκτέλεση ανάλυσης στο παρασκήνιο με το ffmpeg_kit_flutter_video και υπολογισμός RMS peaks απευθείας με Dart.
