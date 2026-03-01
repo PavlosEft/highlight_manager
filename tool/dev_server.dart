@@ -10,14 +10,15 @@ Timer? debounceTimer;
 
 void main() async {
   print('====================================================');
-  print('🚀 HIGHLIGHT MANAGER - PRO DEV SERVER');
+  print('HIGHLIGHT MANAGER - PRO DEV SERVER');
   print('====================================================');
-  print('⌨️ ΣΥΝΤΟΜΕΥΣΕΙΣ ΠΛΗΚΤΡΟΛΟΓΙΟΥ:');
-  print('  [r] - Hot Reload: Εφαρμογή αλλαγών κώδικα ακαριαία.');
-  print('  [R] - Hot Restart: Πλήρης επανεκκίνηση της εφαρμογής.');
+  print('ΣΥΝΤΟΜΕΥΣΕΙΣ ΠΛΗΚΤΡΟΛΟΓΙΟΥ:');
   print('  [c] - Create (OK) Zip: Μόνιμο Snapshot έξω, χωρίς να διαγράφεται.');
   print('  [g] - Git Push: Αυτόματο add, commit και push.');
   print('  [u] - Undo: Επαναφορά στην προηγούμενη έκδοση από το φάκελο Backups.');
+  print('-----------------------------------------------------');
+  print('  [r] - Hot Reload: Εφαρμογή αλλαγών κώδικα ακαριαία.');
+  print('  [R] - Hot Restart: Πλήρης επανεκκίνηση της εφαρμογής.');
   print('  [q] - Quit: Τερματισμός του Server και της εφαρμογής.');
   print('====================================================');
   
@@ -30,7 +31,7 @@ void main() async {
     exit(0);
   });
 
-  print('⏳ Ξεκινάει το Flutter...');
+  print('Ξεκινάει το Flutter...');
   flutterProcess = await Process.start('flutter', ['run', '-d', 'windows'], runInShell: true);
 
   flutterProcess!.stdout.transform(utf8.decoder).listen((data) => stdout.write(data));
