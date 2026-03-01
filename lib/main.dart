@@ -101,6 +101,9 @@ const Map<String, Map<String, String>> translations = {
     'delete_confirm_title': 'Διαγραφή Project',
     'delete_confirm_msg': 'Είστε σίγουροι ότι θέλετε να διαγράψετε αυτό το project; Η ενέργεια δεν αναιρείται.',
     'duration': 'Συνολική Διάρκεια:',
+    'rename_project': 'Μετονομασία Project',
+    'new_name': 'Νέο Όνομα',
+    'save': 'Αποθήκευση',
   },
   'en': {
     'title': 'Highlight Manager',
@@ -125,6 +128,9 @@ const Map<String, Map<String, String>> translations = {
     'delete_confirm_title': 'Delete Project',
     'delete_confirm_msg': 'Are you sure you want to delete this project? This action cannot be undone.',
     'duration': 'Total Duration:',
+    'rename_project': 'Rename Project',
+    'new_name': 'New Name',
+    'save': 'Save',
   }
 };
 
@@ -239,6 +245,15 @@ class AppState extends ChangeNotifier {
       notifyListeners();
     } catch (e) {
       debugPrint("${t('err_save')} $e");
+    }
+  }
+
+  // Μετονομασία Project
+  Future<void> renameProject(String id, String newName) async {
+    final index = projects.indexWhere((p) => p.id == id);
+    if (index != -1) {
+      projects[index].name = newName;
+      await saveProject(projects[index]);
     }
   }
 
@@ -426,6 +441,9 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
             children: [
             TextField(
               controller: _nameController,
+              minLines: 1,
+              maxLines: 4,
+              keyboardType: TextInputType.multiline,
               onChanged: (v) => _userEditedName = v.isNotEmpty,
               decoration: InputDecoration(
                 hintText: t('example_hint'),
@@ -478,7 +496,7 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
                     itemBuilder: (context, index) {
                       final path = _selectedPaths[index];
                       final fileName = path.split(RegExp(r'[\\/]')).last;
-                      return ReorderableDragStartListener(
+                      return ReorderableDelayedDragStartListener(
                         key: ValueKey(path),
                         index: index,
                         child: ListTile(
@@ -533,7 +551,43 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
+  void _showRenameDialog(BuildContext context, Project project, AppState state) {
+    final TextEditingController controller = TextEditingController(text: project.name);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(state.t('rename_project'), style: const TextStyle(fontWeight: FontWeight.bold)),
+        content: TextField(
+          controller: controller,
+          minLines: 1,
+          maxLines: 4,
+          keyboardType: TextInputType.multiline,
+          decoration: InputDecoration(
+            labelText: state.t('new_name'),
+            border: const OutlineInputBorder(),
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(state.t('cancel'))),
+          FilledButton(
+            onPressed: () {
+              final newName = controller.text.trim();
+              if (newName.isNotEmpty && newName != project.name) {
+                state.renameProject(project.id, newName);
+              }
+              Navigator.pop(ctx);
+            },
+            child: Text(state.t('save')),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildProjectCard(BuildContext context, Project project, AppState state) {
+    final isDesktop = MediaQuery.of(context).size.width > 600 || Platform.isWindows || Platform.isMacOS || Platform.isLinux;
+
     String formatDuration(double totalSeconds) {
       if (totalSeconds <= 0) return "--:--";
       int h = totalSeconds ~/ 3600;
@@ -546,6 +600,7 @@ class HomeScreen extends StatelessWidget {
     return Card(
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
+        onLongPress: () => _showRenameDialog(context, project, state),
         onTap: () {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('${state.t('open_editor')} ${project.name}...')),
@@ -603,6 +658,12 @@ class HomeScreen extends StatelessWidget {
                   ],
                 ),
               ),
+              if (isDesktop)
+                IconButton(
+                  icon: Icon(Icons.edit_outlined, color: Theme.of(context).colorScheme.primary),
+                  onPressed: () => _showRenameDialog(context, project, state),
+                  tooltip: state.t('rename_project'),
+                ),
               IconButton(
                 icon: Icon(Icons.delete_outline, color: Theme.of(context).colorScheme.error),
                 onPressed: () async {
@@ -610,7 +671,15 @@ class HomeScreen extends StatelessWidget {
                     context: context,
                     builder: (ctx) => AlertDialog(
                       title: Text(state.t('delete_confirm_title'), style: const TextStyle(fontWeight: FontWeight.bold)),
-                      content: Text(state.t('delete_confirm_msg')),
+                      content: RichText(
+                        text: TextSpan(
+                          style: Theme.of(ctx).textTheme.bodyMedium,
+                          children: [
+                            TextSpan(text: '${state.t('delete_confirm_msg')}\n\n'),
+                            TextSpan(text: project.name, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.redAccent)),
+                          ],
+                        ),
+                      ),
                       actions: [
                         TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(state.t('no'))),
                         FilledButton(
