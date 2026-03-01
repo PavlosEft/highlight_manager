@@ -552,16 +552,42 @@ class HomeScreen extends StatelessWidget {
           );
         },
         child: Padding(
-          padding: const EdgeInsets.all(16.0),
+          padding: const EdgeInsets.all(12.0),
           child: Row(
             children: [
+              // Πλαίσιο Thumbnail
               Container(
-                padding: const EdgeInsets.all(12),
+                width: 100,
+                height: 64,
                 decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.4),
-                  shape: BoxShape.circle,
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                child: Icon(Icons.video_library, size: 32, color: Theme.of(context).colorScheme.primary),
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Icon(
+                      Icons.movie_creation_outlined, 
+                      size: 32, 
+                      color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.5)
+                    ),
+                    Positioned(
+                      bottom: 4,
+                      right: 4,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.black87,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          formatDuration(project.totalDuration),
+                          style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(width: 16),
               Expanded(
@@ -569,9 +595,9 @@ class HomeScreen extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(project.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), maxLines: 1, overflow: TextOverflow.ellipsis),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 4),
                     Text(
-                      '${project.videoPaths.length} ${state.t('video_files')} • ${state.t('duration')} ${formatDuration(project.totalDuration)}\n${state.t('updated')} ${project.createdAt.day}/${project.createdAt.month}/${project.createdAt.year}',
+                      '${project.videoPaths.length} ${state.t('video_files')}\n${state.t('updated')} ${project.createdAt.day}/${project.createdAt.month}/${project.createdAt.year}',
                       style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 13, height: 1.4),
                     ),
                   ],
@@ -610,7 +636,6 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = Provider.of<AppState>(context);
-    final isDesktop = MediaQuery.of(context).size.width > 600;
 
     return Scaffold(
       appBar: AppBar(
@@ -629,37 +654,46 @@ class HomeScreen extends StatelessWidget {
           const SizedBox(width: 8),
         ],
       ),
-      body: state.isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : state.projects.isEmpty
-              ? Center(
-                  child: Text(
-                    state.t('no_projects'),
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 16, color: Colors.grey),
-                  ),
-                )
-              : isDesktop
-                  ? GridView.builder(
-                      padding: const EdgeInsets.all(24),
-                      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                        maxCrossAxisExtent: 400,
-                        crossAxisSpacing: 16,
-                        mainAxisSpacing: 16,
-                        childAspectRatio: 2.5,
-                      ),
-                      itemCount: state.projects.length,
-                      itemBuilder: (context, index) => _buildProjectCard(context, state.projects[index], state),
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.all(16),
-                      itemCount: state.projects.length,
-                      itemBuilder: (context, index) => _buildProjectCard(context, state.projects[index], state),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 600),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 56,
+                  child: FilledButton.icon(
+                    onPressed: () => _showCreateProjectDialog(context, state),
+                    icon: const Icon(Icons.add, size: 28),
+                    label: Text(state.t('new_project'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                    style: FilledButton.styleFrom(
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                     ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showCreateProjectDialog(context, state),
-        icon: const Icon(Icons.add),
-        label: Text(state.t('new_project'), style: const TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: state.isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : state.projects.isEmpty
+                        ? Center(
+                            child: Text(
+                              state.t('no_projects'),
+                              textAlign: TextAlign.center,
+                              style: TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5)),
+                            ),
+                          )
+                        : ListView.builder(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            itemCount: state.projects.length,
+                            itemBuilder: (context, index) => _buildProjectCard(context, state.projects[index], state),
+                          ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
