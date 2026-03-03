@@ -24,7 +24,7 @@ void main() async {
   print('  [u] - Undo: Επαναφορά στην προηγούμενη έκδοση από το φάκελο Backups.');
   print('  [b] - Browser: Άνοιγμα της εφαρμογής στον Chrome (Web).');
   print('-----------------------------------------------------');
-  print('  [r] - Hot Reload: Εφαρμογή αλλαγών κώδικα ακαριαία.');
+  print('  [r] - Hot Reload: Εφαρμογή αλλαγών κώδικα ακαριαία (μόνο σε Debug).');
   print('  [R] - Hot Restart: Πλήρης επανεκκίνηση της εφαρμογής.');
   print('  [q] - Quit: Τερματισμός του Server και της εφαρμογής.');
   print('====================================================');
@@ -38,30 +38,11 @@ void main() async {
     exit(0);
   });
 
-  print('Αναζήτηση διαθέσιμων συσκευών...');
-  final deviceResult = await Process.run('flutter', ['devices', '--machine'], runInShell: true);
-  final List<dynamic> devices = jsonDecode(deviceResult.stdout);
-  
-  List<String> targetIds = [];
-
-  for (var d in devices) {
-    final String id = d['id'] ?? '';
-    if (!(d['isSupported'] ?? false)) continue;
-
-    if (id == 'windows') {
-      targetIds.add(id);
-    } else if (id != 'chrome' && d['sdk'] != null && (d['sdk'].toString().contains('Android') || d['sdk'].toString().contains('iOS'))) {
-      targetIds.add(id);
-    }
-  }
-
-  for (var devId in targetIds) {
-    print('Εκκίνηση στη συσκευή: $devId');
-    final p = await Process.start('flutter', ['run', '-d', devId], runInShell: true);
-    flutterProcesses.add(p);
-    p.stdout.transform(utf8.decoder).listen((data) => stdout.write('[$devId] $data'));
-    p.stderr.transform(utf8.decoder).listen((data) => stderr.write('[$devId] $data'));
-  }
+  print('Εκκίνηση εφαρμογής (Windows)');
+  final p = await Process.start('flutter', ['run', '-d', 'windows'], runInShell: true);
+  flutterProcesses.add(p);
+  p.stdout.transform(utf8.decoder).listen((data) => stdout.write('[windows] $data'));
+  p.stderr.transform(utf8.decoder).listen((data) => stderr.write('[windows] $data'));
 
   try {
     stdin.lineMode = false;
