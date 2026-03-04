@@ -1399,6 +1399,9 @@ class _EditorScreenState extends State<EditorScreen> {
   
   int activePhaseIndex = -1;
   HighlightPhase? currentPlayingPhase;
+  
+  List<HighlightPhase> historyStack = [];
+  List<HighlightPhase> forwardStack = [];
 
   // --- UI Settings State ---
   double sensitivity = 55.0;
@@ -1468,7 +1471,7 @@ class _EditorScreenState extends State<EditorScreen> {
 
       if (currentGlobalSec >= targetEnd) {
         if (autoplay) {
-          _navigate(1);
+          _navigate(1, isAuto: true);
         } else {
           player.pause();
         }
@@ -1556,9 +1559,27 @@ class _EditorScreenState extends State<EditorScreen> {
     }).toList();
   }
 
-  void _navigate(int direction) {
+  void _navigate(int direction, {bool isAuto = false}) {
     final phases = _filteredPhases;
     if (phases.isEmpty) return;
+    
+    if (direction == -1 && historyStack.isNotEmpty) {
+      if (currentPlayingPhase != null) forwardStack.add(currentPlayingPhase!);
+      final prevPhase = historyStack.removeLast();
+      int idx = phases.indexOf(prevPhase);
+      if (idx != -1) {
+        _playPhase(idx, phases, recordHistory: false);
+        return;
+      }
+    } else if (direction == 1 && !isAuto && forwardStack.isNotEmpty) {
+      if (currentPlayingPhase != null) historyStack.add(currentPlayingPhase!);
+      final nextPhase = forwardStack.removeLast();
+      int idx = phases.indexOf(nextPhase);
+      if (idx != -1) {
+        _playPhase(idx, phases, recordHistory: false);
+        return;
+      }
+    }
     
     int newIndex = activePhaseIndex + direction;
     
@@ -1569,7 +1590,7 @@ class _EditorScreenState extends State<EditorScreen> {
     }
     
     if (newIndex >= 0 && newIndex < phases.length) {
-      _playPhase(newIndex, phases);
+      _playPhase(newIndex, phases, recordHistory: !isAuto);
     } else {
       player.pause();
     }
@@ -1600,8 +1621,13 @@ class _EditorScreenState extends State<EditorScreen> {
     }
   }
 
-  Future<void> _playPhase(int index, List<HighlightPhase> phases) async {
+  Future<void> _playPhase(int index, List<HighlightPhase> phases, {bool recordHistory = true}) async {
     if (index < 0 || index >= phases.length) return;
+    
+    if (recordHistory && currentPlayingPhase != null) {
+      historyStack.add(currentPlayingPhase!);
+      forwardStack.clear();
+    }
     
     setState(() {
       activePhaseIndex = index;
