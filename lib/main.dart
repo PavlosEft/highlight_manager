@@ -1472,7 +1472,7 @@ class _EditorScreenState extends State<EditorScreen> {
       if (currentGlobalSec >= targetEnd) {
         if (autoplay) {
           _navigate(1, isAuto: true);
-        } else {
+        } else if (currentPlayingPhase!.isHighlight) {
           player.pause();
         }
       }
@@ -1597,6 +1597,7 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   Future<void> _seekGlobal(double targetSeconds) async {
+    bool wasPlaying = isPlaying;
     double accumulated = 0.0;
     for (int i = 0; i < widget.project.videoDurations.length; i++) {
       double dur = widget.project.videoDurations[i];
@@ -1612,6 +1613,9 @@ class _EditorScreenState extends State<EditorScreen> {
           await Future.delayed(const Duration(milliseconds: 600));
           
           await player.seek(Duration(milliseconds: (localSeconds * 1000).toInt()));
+          if (wasPlaying) {
+            await player.play();
+          }
         } else {
           await player.seek(Duration(milliseconds: (localSeconds * 1000).toInt()));
         }
@@ -1757,10 +1761,22 @@ class _EditorScreenState extends State<EditorScreen> {
           child: Row(
             children: [
               IconButton(
+                iconSize: 32,
+                color: Theme.of(context).colorScheme.primary,
+                icon: const Icon(Icons.skip_previous),
+                onPressed: () => _navigate(-1),
+              ),
+              IconButton(
                 iconSize: 42,
                 color: Theme.of(context).colorScheme.primary,
                 icon: Icon(isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill),
                 onPressed: () => player.playOrPause(),
+              ),
+              IconButton(
+                iconSize: 32,
+                color: Theme.of(context).colorScheme.primary,
+                icon: const Icon(Icons.skip_next),
+                onPressed: () => _navigate(1),
               ),
               const SizedBox(width: 8),
               Expanded(
@@ -1776,6 +1792,20 @@ class _EditorScreenState extends State<EditorScreen> {
                     max: widget.project.totalDuration > 0 ? widget.project.totalDuration : 1.0,
                     onChanged: (v) {
                       setState(() => globalPositionSeconds = v);
+                      double accumulated = 0.0;
+                      for (int i = 0; i < widget.project.videoDurations.length; i++) {
+                        double dur = widget.project.videoDurations[i];
+                        if (v <= accumulated + dur || i == widget.project.videoDurations.length - 1) {
+                          if (player.state.playlist.index == i) {
+                            double localSeconds = v - accumulated;
+                            player.seek(Duration(milliseconds: (math.max(0.0, localSeconds) * 1000).toInt()));
+                          }
+                          break;
+                        }
+                        accumulated += dur;
+                      }
+                    },
+                    onChangeEnd: (v) {
                       _seekGlobal(v);
                     },
                   ),
@@ -2019,7 +2049,13 @@ class _EditorScreenState extends State<EditorScreen> {
                                 color: phase.isHighlight ? Colors.amber : Colors.grey,
                               ),
                               onPressed: () {
-                                setState(() => phase.isHighlight = !phase.isHighlight);
+                                setState(() {
+                                  phase.isHighlight = !phase.isHighlight;
+                                  if (!phase.isHighlight) {
+                                    phase.customStartOffset = null;
+                                    phase.customEndOffset = null;
+                                  }
+                                });
                                 state.saveProject(widget.project);
                               },
                             ),
@@ -2213,6 +2249,10 @@ class _EditorScreenState extends State<EditorScreen> {
               if (currentPlayingPhase != null) {
                 setState(() {
                   currentPlayingPhase!.isHighlight = !currentPlayingPhase!.isHighlight;
+                  if (!currentPlayingPhase!.isHighlight) {
+                    currentPlayingPhase!.customStartOffset = null;
+                    currentPlayingPhase!.customEndOffset = null;
+                  }
                 });
                 state.saveProject(widget.project);
               }
