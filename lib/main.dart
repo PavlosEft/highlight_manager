@@ -1154,6 +1154,23 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
     _startExport();
   }
 
+  ({String path, double localSeconds}) _getLocalVideoData(double globalSeconds) {
+    if (widget.project.videoPaths.isEmpty) return (path: '', localSeconds: 0.0);
+    if (widget.project.videoDurations.isEmpty) return (path: widget.project.videoPaths.first, localSeconds: globalSeconds);
+
+    double accumulated = 0.0;
+    for (int i = 0; i < widget.project.videoDurations.length; i++) {
+      double dur = widget.project.videoDurations[i];
+      if (globalSeconds <= accumulated + dur || i == widget.project.videoDurations.length - 1) {
+        double localSec = globalSeconds - accumulated;
+        if (localSec < 0) localSec = 0;
+        return (path: widget.project.videoPaths[i], localSeconds: localSec);
+      }
+      accumulated += dur;
+    }
+    return (path: widget.project.videoPaths.last, localSeconds: 0.0);
+  }
+
   void _cancel() {
     setState(() {
       isCancelled = true;
@@ -1197,7 +1214,6 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
       final tempDir = Directory('${widget.outDir}/temp_$timestamp');
       if (widget.mode == 'join') await tempDir.create();
 
-      final videoPath = widget.project.videoPaths.first;
       final isCompress = widget.config['compress'] as bool;
       
       List<String> videoParams = isCompress 
@@ -1216,12 +1232,13 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
           });
 
           final ts = widget.highlights[i].timestamp;
-          final start = math.max(0.0, ts - widget.startOffset);
+          final startGlobal = math.max(0.0, ts - widget.startOffset);
+          final localData = _getLocalVideoData(startGlobal);
           final dur = widget.startOffset + widget.endOffset + 0.5;
           final outPath = '${clipsDir.path}/clip_${i + 1}.mp4';
 
           final args = [
-            '-y', '-ss', start.toString(), '-i', videoPath, '-t', dur.toString(),
+            '-y', '-ss', localData.localSeconds.toStringAsFixed(3), '-i', localData.path, '-t', dur.toString(),
             ...videoParams, '-c:a', 'aac', outPath
           ];
           
@@ -1258,12 +1275,13 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
           });
 
           final ts = widget.highlights[i].timestamp;
-          final start = math.max(0.0, ts - widget.startOffset);
+          final startGlobal = math.max(0.0, ts - widget.startOffset);
+          final localData = _getLocalVideoData(startGlobal);
           final dur = widget.startOffset + widget.endOffset + 0.5;
           final clipTemp = '${tempDir.path}/part_$i.mp4';
 
           final args = [
-            '-y', '-ss', start.toString(), '-i', videoPath, '-t', dur.toString(),
+            '-y', '-ss', localData.localSeconds.toStringAsFixed(3), '-i', localData.path, '-t', dur.toString(),
             ...videoParams, '-c:a', 'aac', '-vf', 'scale=1920:1080', clipTemp
           ];
           final code = await _runFFmpeg(args);
