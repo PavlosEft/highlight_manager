@@ -1678,6 +1678,31 @@ class _EditorScreenState extends State<EditorScreen> {
     );
   }
 
+  bool _areAllHighlightsSelected() {
+    final highlights = widget.project.phases.where((p) => p.isHighlight);
+    if (highlights.isEmpty) return false;
+    return highlights.every((p) => p.isSelected);
+  }
+
+  void _toggleAllHighlights(bool? val) {
+    final bool select = val ?? true;
+    setState(() {
+      for (var p in widget.project.phases.where((p) => p.isHighlight)) {
+        p.isSelected = select;
+      }
+    });
+    Provider.of<AppState>(context, listen: false).saveProject(widget.project);
+  }
+
+  void _resetSeen() {
+    setState(() {
+      for (var p in widget.project.phases) {
+        p.isSeen = false;
+      }
+    });
+    Provider.of<AppState>(context, listen: false).saveProject(widget.project);
+  }
+
   Widget _buildVideoPlayer(BuildContext context) {
     return Column(
       children: [
@@ -1879,6 +1904,29 @@ class _EditorScreenState extends State<EditorScreen> {
                   onPressed: _addManualHighlight,
                   child: const Text('Add Manual', style: TextStyle(fontSize: 11)),
                 ),
+              ),
+            ],
+          ),
+        ),
+
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8.0),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Checkbox(
+                    value: _areAllHighlightsSelected(),
+                    onChanged: _toggleAllHighlights,
+                  ),
+                  const Text('Επιλογή Όλων', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                ],
+              ),
+              TextButton.icon(
+                onPressed: _resetSeen,
+                icon: const Icon(Icons.cleaning_services, size: 16),
+                label: const Text('Reset Seen', style: TextStyle(fontSize: 12)),
               ),
             ],
           ),
