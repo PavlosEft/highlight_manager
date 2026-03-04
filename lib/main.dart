@@ -10,7 +10,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:ffmpeg_kit_flutter_min_gpl/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_min_gpl/return_code.dart';
-import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter/services.dart';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -1013,6 +1013,325 @@ class HomeScreen extends StatelessWidget {
 // 4. EDITOR SCREEN (Phase 2)
 // ==========================================
 
+class ExportSettingsDialog extends StatefulWidget {
+  final String mode;
+  const ExportSettingsDialog({super.key, required this.mode});
+
+  @override
+  State<ExportSettingsDialog> createState() => _ExportSettingsDialogState();
+}
+
+class _ExportSettingsDialogState extends State<ExportSettingsDialog> {
+  bool compress = false;
+  String transPath = '';
+  double transDur = 1.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = widget.mode == 'join' ? 'Εξαγωγή Video (Join)' : 'Εξαγωγή Clips';
+    return AlertDialog(
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CheckboxListTile(
+              title: const Text('Συμπίεση H.265 (Small Size)'),
+              subtitle: const Text('Μειώνει το μέγεθος αρχείου. Η εξαγωγή θα διαρκέσει περισσότερο.'),
+              value: compress,
+              onChanged: (v) => setState(() => compress = v ?? false),
+              contentPadding: EdgeInsets.zero,
+            ),
+            if (widget.mode == 'join') ...[
+              const Divider(),
+              const Text('Transition (Προαιρετικό)', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(transPath.isEmpty ? 'Εικόνα ή Video...' : transPath.split(RegExp(r'[\\/]')).last, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.folder_open),
+                    onPressed: () async {
+                      final res = await FilePicker.platform.pickFiles(type: FileType.media);
+                      if (res != null && res.files.single.path != null) {
+                        setState(() => transPath = res.files.single.path!);
+                      }
+                    },
+                  ),
+                  if (transPath.isNotEmpty)
+                    IconButton(
+                      icon: const Icon(Icons.clear, color: Colors.red),
+                      onPressed: () => setState(() => transPath = ''),
+                    ),
+                ],
+              ),
+              if (transPath.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Text('Διάρκεια:'),
+                    Expanded(
+                      child: Slider(
+                        value: transDur,
+                        min: 0.1,
+                        max: 2.0,
+                        divisions: 19,
+                        label: '${transDur.toStringAsFixed(1)}s',
+                        onChanged: (v) => setState(() => transDur = v),
+                      ),
+                    ),
+                    Text('${transDur.toStringAsFixed(1)}s'),
+                  ],
+                ),
+              ],
+            ]
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('ΑΚΥΡΩΣΗ')),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, {
+            'compress': compress,
+            'trans_path': transPath,
+            'trans_dur': transDur,
+          }),
+          child: const Text('ΕΞΑΓΩΓΗ'),
+        ),
+      ],
+    );
+  }
+}
+
+class ExportProgressDialog extends StatefulWidget {
+  final Project project;
+  final List<HighlightPhase> highlights;
+  final Map<String, dynamic> config;
+  final String mode;
+  final String outDir;
+  final double startOffset;
+  final double endOffset;
+
+  const ExportProgressDialog({
+    super.key,
+    required this.project,
+    required this.highlights,
+    required this.config,
+    required this.mode,
+    required this.outDir,
+    required this.startOffset,
+    required this.endOffset,
+  });
+
+  @override
+  State<ExportProgressDialog> createState() => _ExportProgressDialogState();
+}
+
+class _ExportProgressDialogState extends State<ExportProgressDialog> {
+  String status = "Προετοιμασία...";
+  double progress = 0.0;
+  bool isFinished = false;
+  bool isCancelled = false;
+  Process? _activeProcess;
+
+  @override
+  void initState() {
+    super.initState();
+    _startExport();
+  }
+
+  void _cancel() {
+    setState(() {
+      isCancelled = true;
+      status = "Ακύρωση...";
+    });
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      _activeProcess?.kill();
+    } else {
+      FFmpegKit.cancel();
+    }
+  }
+
+  Future<String> _getDesktopFFmpegPath() async {
+    final supportDir = await getApplicationSupportDirectory();
+    final ffmpegFile = File('${supportDir.path}/ffmpeg.exe');
+    if (!await ffmpegFile.exists()) {
+      final byteData = await rootBundle.load('assets/bin/ffmpeg.exe');
+      await ffmpegFile.writeAsBytes(byteData.buffer.asUint8List(byteData.offsetInBytes, byteData.lengthInBytes));
+    }
+    return ffmpegFile.path;
+  }
+
+  Future<int> _runFFmpeg(List<String> args) async {
+    if (isCancelled) return 255;
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      final ffmpegExe = await _getDesktopFFmpegPath();
+      _activeProcess = await Process.start(ffmpegExe, args);
+      _activeProcess!.stdout.drain();
+      _activeProcess!.stderr.drain();
+      return await _activeProcess!.exitCode;
+    } else {
+      final session = await FFmpegKit.executeWithArguments(args);
+      final returnCode = await session.getReturnCode();
+      return returnCode?.isValueSuccess() == true ? 0 : 1;
+    }
+  }
+
+  Future<void> _startExport() async {
+    try {
+      final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
+      final tempDir = Directory('${widget.outDir}/temp_$timestamp');
+      if (widget.mode == 'join') await tempDir.create();
+
+      final videoPath = widget.project.videoPaths.first;
+      final isCompress = widget.config['compress'] as bool;
+      
+      List<String> videoParams = isCompress 
+          ? ['-c:v', 'libx265', '-crf', '26', '-preset', 'medium', '-tag:v', 'hvc1']
+          : ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23'];
+
+      if (widget.mode == 'separate') {
+        final clipsDir = Directory('${widget.outDir}/${widget.project.name}_clips_$timestamp');
+        await clipsDir.create();
+
+        for (int i = 0; i < widget.highlights.length; i++) {
+          if (isCancelled) throw Exception('Cancelled');
+          setState(() {
+            status = "Εξαγωγή ${i + 1}/${widget.highlights.length}...";
+            progress = i / widget.highlights.length;
+          });
+
+          final ts = widget.highlights[i].timestamp;
+          final start = math.max(0.0, ts - widget.startOffset);
+          final dur = widget.startOffset + widget.endOffset + 0.5;
+          final outPath = '${clipsDir.path}/clip_${i + 1}.mp4';
+
+          final args = [
+            '-y', '-ss', start.toString(), '-i', videoPath, '-t', dur.toString(),
+            ...videoParams, '-c:a', 'aac', outPath
+          ];
+          
+          final code = await _runFFmpeg(args);
+          if (code != 0 && !isCancelled) throw Exception('FFmpeg error');
+        }
+      } else {
+        List<String> processedClips = [];
+        final transPath = widget.config['trans_path'] as String;
+        final transDur = widget.config['trans_dur'] as double;
+        String transTemp = '';
+
+        if (transPath.isNotEmpty) {
+          setState(() => status = "Προετοιμασία Transition...");
+          transTemp = '${tempDir.path}/trans.mp4';
+          final isImage = transPath.toLowerCase().endsWith('.jpg') || transPath.toLowerCase().endsWith('.png');
+          
+          List<String> trArgs = ['-y'];
+          if (isImage) trArgs.addAll(['-loop', '1']);
+          trArgs.addAll([
+            '-i', transPath,
+            '-vf', 'scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2',
+            '-t', transDur.toString(),
+            ...videoParams, '-c:a', 'aac', '-f', 'mp4', transTemp
+          ]);
+          await _runFFmpeg(trArgs);
+        }
+
+        for (int i = 0; i < widget.highlights.length; i++) {
+          if (isCancelled) throw Exception('Cancelled');
+          setState(() {
+            status = "Προετοιμασία ${i + 1}/${widget.highlights.length}...";
+            progress = i / widget.highlights.length * 0.9;
+          });
+
+          final ts = widget.highlights[i].timestamp;
+          final start = math.max(0.0, ts - widget.startOffset);
+          final dur = widget.startOffset + widget.endOffset + 0.5;
+          final clipTemp = '${tempDir.path}/part_$i.mp4';
+
+          final args = [
+            '-y', '-ss', start.toString(), '-i', videoPath, '-t', dur.toString(),
+            ...videoParams, '-c:a', 'aac', '-vf', 'scale=1920:1080', clipTemp
+          ];
+          final code = await _runFFmpeg(args);
+          if (code != 0 && !isCancelled) throw Exception('FFmpeg error');
+          processedClips.add(clipTemp);
+        }
+
+        if (isCancelled) throw Exception('Cancelled');
+        setState(() {
+          status = "Ένωση αρχείων (Finalizing)...";
+          progress = 0.95;
+        });
+
+        final listFile = File('${tempDir.path}/inputs.txt');
+        String listContent = '';
+        for (int i = 0; i < processedClips.length; i++) {
+          listContent += "file '${processedClips[i].replaceAll('\\', '/')}'\n";
+          if (transTemp.isNotEmpty && i < processedClips.length - 1) {
+            listContent += "file '${transTemp.replaceAll('\\', '/')}'\n";
+          }
+        }
+        await listFile.writeAsString(listContent);
+
+        final mergedOut = '${widget.outDir}/${widget.project.name}_merged_$timestamp.mp4';
+        final catArgs = [
+          '-y', '-f', 'concat', '-safe', '0', '-i', listFile.path, '-c', 'copy', mergedOut
+        ];
+        final code = await _runFFmpeg(catArgs);
+        if (code != 0 && !isCancelled) throw Exception('FFmpeg error concat');
+        
+        try { await tempDir.delete(recursive: true); } catch (_) {}
+      }
+
+      if (isCancelled) throw Exception('Cancelled');
+      setState(() {
+        status = "Ολοκληρώθηκε!";
+        progress = 1.0;
+        isFinished = true;
+      });
+    } catch (e) {
+      if (!isCancelled) {
+        setState(() {
+          status = "Σφάλμα: $e";
+          isFinished = true;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(isFinished ? 'Ολοκληρώθηκε' : 'Επεξεργασία...', style: const TextStyle(fontWeight: FontWeight.bold)),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(status, textAlign: TextAlign.center),
+          const SizedBox(height: 16),
+          LinearProgressIndicator(value: progress),
+          const SizedBox(height: 8),
+          Text('${(progress * 100).toInt()}%', style: const TextStyle(fontWeight: FontWeight.bold)),
+        ],
+      ),
+      actions: [
+        if (!isFinished)
+          TextButton(
+            onPressed: isCancelled ? null : _cancel,
+            child: Text(isCancelled ? 'ΑΚΥΡΩΝΕΤΑΙ...' : 'ΑΚΥΡΩΣΗ', style: const TextStyle(color: Colors.red)),
+          )
+        else
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('ΚΛΕΙΣΙΜΟ'),
+          ),
+      ],
+    );
+  }
+}
+
 class EditorScreen extends StatefulWidget {
   final Project project;
   const EditorScreen({super.key, required this.project});
@@ -1027,9 +1346,13 @@ class _EditorScreenState extends State<EditorScreen> {
 
   StreamSubscription? playingSub;
   StreamSubscription? durationSub;
+  StreamSubscription? positionSub;
 
   bool isPlaying = false;
   Duration duration = Duration.zero;
+  
+  int activePhaseIndex = -1;
+  HighlightPhase? currentPlayingPhase;
 
   // --- UI Settings State ---
   double sensitivity = 55.0;
@@ -1042,6 +1365,13 @@ class _EditorScreenState extends State<EditorScreen> {
   // --- Filters ---
   bool showHighlightsOnly = false;
   bool hideSeenPhases = false;
+
+  // --- Analysis Data ---
+  List<double> rmsData = [];
+  List<double> timesData = [];
+  double maxRms = 0.0;
+  double avgRms = 0.0;
+  bool isLoadingAnalysis = true;
 
   @override
   void initState() {
@@ -1065,15 +1395,142 @@ class _EditorScreenState extends State<EditorScreen> {
       if (mounted) setState(() => duration = d);
     });
     
+    positionSub = player.stream.position.listen((pos) {
+      if (!isPlaying || currentPlayingPhase == null) return;
+      
+      final currentSec = pos.inMilliseconds / 1000.0;
+      final targetEnd = currentPlayingPhase!.timestamp + endOffset;
+
+      if (currentSec >= targetEnd) {
+        if (autoplay) {
+          _navigate(1);
+        } else {
+          player.pause();
+        }
+      }
+    });
+    
     if (widget.project.videoPaths.isNotEmpty) {
       player.open(Media(widget.project.videoPaths.first), play: false);
     }
+    
+    _loadAnalysisData();
+  }
+
+  Future<void> _loadAnalysisData() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final pDir = Directory('${dir.path}/HighlightManager/${widget.project.id}');
+      final file = File('${pDir.path}/analysis.json');
+      if (await file.exists()) {
+        final content = await file.readAsString();
+        final data = jsonDecode(content);
+        maxRms = data['max_rms']?.toDouble() ?? 0.0;
+        avgRms = data['avg_rms']?.toDouble() ?? 0.0;
+        rmsData = List<double>.from(data['rms'].map((x) => x.toDouble()));
+        timesData = List<double>.from(data['times'].map((x) => x.toDouble()));
+
+        _recalcPhases();
+      }
+    } catch (e) {
+      debugPrint("Error loading analysis: $e");
+    } finally {
+      if (mounted) setState(() => isLoadingAnalysis = false);
+    }
+  }
+
+  void _recalcPhases() {
+    if (rmsData.isEmpty) return;
+    
+    // Μαθηματικός τύπος από την παλιά Python εφαρμογή
+    double level = maxRms - (sensitivity / 100.0) * (maxRms - avgRms);
+    List<double> rawTimes = [];
+    for (int i = 0; i < rmsData.length; i++) {
+      if (rmsData[i] > level) rawTimes.add(timesData[i]);
+    }
+    
+    // Ομαδοποίηση (Grouping)
+    List<double> grouped = [];
+    if (rawTimes.isNotEmpty) {
+      grouped.add(rawTimes[0]);
+      for (int i = 1; i < rawTimes.length; i++) {
+        if (rawTimes[i] - grouped.last > grouping) {
+          grouped.add(rawTimes[i]);
+        }
+      }
+    }
+
+    List<HighlightPhase> finalPhases = [];
+    
+    // 1. Διατηρούμε όσα έχει κάνει ρητά Highlight ο χρήστης
+    final existingHighlights = widget.project.phases.where((p) => p.isHighlight).toList();
+    finalPhases.addAll(existingHighlights);
+
+    // 2. Εισάγουμε τις νέες φάσεις, ελέγχοντας αν προϋπάρχουν και αν ήταν "Seen"
+    for (double t in grouped) {
+      bool isAlreadyHighlight = finalPhases.any((p) => (p.timestamp - t).abs() < 0.5);
+      if (!isAlreadyHighlight) {
+        bool wasSeen = widget.project.phases.any((p) => !p.isHighlight && p.isSeen && (p.timestamp - t).abs() < 0.5);
+        finalPhases.add(HighlightPhase(timestamp: t, isHighlight: false, isSeen: wasSeen));
+      }
+    }
+
+    finalPhases.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
+    setState(() {
+      widget.project.phases = finalPhases;
+    });
+  }
+
+  List<HighlightPhase> get _filteredPhases {
+    return widget.project.phases.where((p) {
+      if (showHighlightsOnly && !p.isHighlight) return false;
+      if (hideSeenPhases && p.isSeen) return false;
+      return true;
+    }).toList();
+  }
+
+  void _navigate(int direction) {
+    final phases = _filteredPhases;
+    if (phases.isEmpty) return;
+    
+    int newIndex = activePhaseIndex + direction;
+    
+    if (direction == 1 && skipSeen) {
+      while (newIndex < phases.length && phases[newIndex].isSeen) {
+        newIndex++;
+      }
+    }
+    
+    if (newIndex >= 0 && newIndex < phases.length) {
+      _playPhase(newIndex, phases);
+    } else {
+      player.pause();
+    }
+  }
+
+  void _playPhase(int index, List<HighlightPhase> phases) {
+    if (index < 0 || index >= phases.length) return;
+    
+    setState(() {
+      activePhaseIndex = index;
+      currentPlayingPhase = phases[index];
+      currentPlayingPhase!.isSeen = true;
+    });
+    
+    Provider.of<AppState>(context, listen: false).saveProject(widget.project);
+    
+    double startSeconds = math.max(0.0, currentPlayingPhase!.timestamp - startOffset);
+    print('[PLAYBACK] Starting phase at ${startSeconds.toStringAsFixed(2)}s');
+    player.seek(Duration(milliseconds: (startSeconds * 1000).toInt()));
+    player.play();
   }
 
   @override
   void dispose() {
     playingSub?.cancel();
     durationSub?.cancel();
+    positionSub?.cancel();
     player.dispose();
     super.dispose();
   }
@@ -1175,11 +1632,7 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   Widget _buildSidePanel(BuildContext context, AppState state) {
-    final filteredPhases = widget.project.phases.where((p) {
-      if (showHighlightsOnly && !p.isHighlight) return false;
-      if (hideSeenPhases && p.isSeen) return false;
-      return true;
-    }).toList();
+    final phases = _filteredPhases;
 
     return Column(
       children: [
@@ -1202,6 +1655,10 @@ class _EditorScreenState extends State<EditorScreen> {
                         Slider(
                           value: sensitivity, max: 100,
                           onChanged: (v) => setState(() => sensitivity = v),
+                          onChangeEnd: (v) {
+                            _recalcPhases();
+                            Provider.of<AppState>(context, listen: false).saveProject(widget.project);
+                          },
                         ),
                       ],
                     ),
@@ -1214,6 +1671,10 @@ class _EditorScreenState extends State<EditorScreen> {
                         Slider(
                           value: grouping, max: 10,
                           onChanged: (v) => setState(() => grouping = v),
+                          onChangeEnd: (v) {
+                            _recalcPhases();
+                            Provider.of<AppState>(context, listen: false).saveProject(widget.project);
+                          },
                         ),
                       ],
                     ),
@@ -1230,6 +1691,7 @@ class _EditorScreenState extends State<EditorScreen> {
                         Slider(
                           value: startOffset, max: 10,
                           onChanged: (v) => setState(() => startOffset = v),
+                          onChangeEnd: (v) => Provider.of<AppState>(context, listen: false).saveProject(widget.project),
                         ),
                       ],
                     ),
@@ -1242,6 +1704,7 @@ class _EditorScreenState extends State<EditorScreen> {
                         Slider(
                           value: endOffset, max: 10,
                           onChanged: (v) => setState(() => endOffset = v),
+                          onChangeEnd: (v) => Provider.of<AppState>(context, listen: false).saveProject(widget.project),
                         ),
                       ],
                     ),
@@ -1309,81 +1772,161 @@ class _EditorScreenState extends State<EditorScreen> {
 
         // --- UNIFIED LIST ---
         Expanded(
-          child: filteredPhases.isEmpty 
-            ? Center(child: Text('Δεν βρέθηκαν φάσεις', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5))))
-            : ListView.builder(
-                itemCount: filteredPhases.length,
-                itemBuilder: (context, index) {
-                  final phase = filteredPhases[index];
-                  final m = (phase.timestamp ~/ 60).toString().padLeft(2, '0');
-                  final s = (phase.timestamp % 60).toInt().toString().padLeft(2, '0');
-                  
-                  final isDark = Theme.of(context).brightness == Brightness.dark;
-                  
-                  return Card(
-                    elevation: isDark ? 2 : 1,
-                    color: phase.isHighlight 
-                      ? (isDark ? const Color(0xFF4A148C) : const Color(0xFFF3E5F5)) 
-                      : (isDark ? const Color(0xFF2C2C34) : Colors.white),
-                    margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      side: BorderSide(
-                        color: phase.isHighlight ? Theme.of(context).colorScheme.primary : (isDark ? Colors.grey.shade700 : Colors.grey.shade300),
-                        width: 1,
+          child: isLoadingAnalysis
+            ? const Center(child: CircularProgressIndicator())
+            : phases.isEmpty 
+              ? Center(child: Text('Δεν βρέθηκαν φάσεις', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5))))
+              : ListView.builder(
+                  itemCount: phases.length,
+                  itemBuilder: (context, index) {
+                    final phase = phases[index];
+                    final m = (phase.timestamp ~/ 60).toString().padLeft(2, '0');
+                    final s = (phase.timestamp % 60).toInt().toString().padLeft(2, '0');
+                    
+                    final isDark = Theme.of(context).brightness == Brightness.dark;
+                    final isActive = (index == activePhaseIndex && currentPlayingPhase == phase);
+                    
+                    Color bgColor;
+                    if (isActive) {
+                      bgColor = isDark ? const Color(0xFF7F1D1D) : const Color(0xFFFFE4E6);
+                    } else if (phase.isHighlight) {
+                      bgColor = isDark ? const Color(0xFF4A148C) : const Color(0xFFF3E5F5);
+                    } else {
+                      bgColor = isDark ? const Color(0xFF2C2C34) : Colors.white;
+                    }
+
+                    Color borderColor;
+                    if (isActive) {
+                      borderColor = isDark ? const Color(0xFFFCA5A5) : const Color(0xFFEF4444);
+                    } else if (phase.isHighlight) {
+                      borderColor = Theme.of(context).colorScheme.primary;
+                    } else {
+                      borderColor = isDark ? Colors.grey.shade700 : Colors.grey.shade300;
+                    }
+                    
+                    return Card(
+                      elevation: isDark ? 2 : 1,
+                      color: bgColor,
+                      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        side: BorderSide(color: borderColor, width: isActive ? 2 : 1),
                       ),
-                    ),
-                    child: ListTile(
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
-                      leading: IconButton(
-                        icon: Icon(
-                          phase.isHighlight ? Icons.star : Icons.star_border,
-                          color: phase.isHighlight ? Colors.amber : Colors.grey,
+                      child: ListTile(
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+                        leading: IconButton(
+                          icon: Icon(
+                            phase.isHighlight ? Icons.star : Icons.star_border,
+                            color: phase.isHighlight ? Colors.amber : Colors.grey,
+                          ),
+                          onPressed: () {
+                            setState(() => phase.isHighlight = !phase.isHighlight);
+                            state.saveProject(widget.project);
+                          },
                         ),
-                        onPressed: () {
-                          setState(() => phase.isHighlight = !phase.isHighlight);
-                          state.saveProject(widget.project);
-                        },
+                        title: Text(
+                          '$m:$s', 
+                          style: TextStyle(
+                            fontWeight: isActive ? FontWeight.bold : FontWeight.normal, 
+                            decoration: phase.isSeen && !isActive ? TextDecoration.lineThrough : null,
+                            color: phase.isSeen && !isActive ? Colors.grey : (isActive ? (isDark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C)) : null)
+                          )
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: Icon(phase.isSeen ? Icons.visibility_off : Icons.visibility, size: 20),
+                              onPressed: () {
+                                setState(() => phase.isSeen = !phase.isSeen);
+                                state.saveProject(widget.project);
+                              },
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
+                              onPressed: () {
+                                setState(() {
+                                  widget.project.phases.remove(phase);
+                                  if (currentPlayingPhase == phase) {
+                                    activePhaseIndex = -1;
+                                    currentPlayingPhase = null;
+                                  }
+                                });
+                                state.saveProject(widget.project);
+                              },
+                            ),
+                          ],
+                        ),
+                        onTap: () => _playPhase(index, phases),
                       ),
-                      title: Text(
-                        '$m:$s', 
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold, 
-                          decoration: phase.isSeen ? TextDecoration.lineThrough : null,
-                          color: phase.isSeen ? Colors.grey : null
-                        )
-                      ),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            icon: Icon(phase.isSeen ? Icons.visibility_off : Icons.visibility, size: 20),
-                            onPressed: () {
-                              setState(() => phase.isSeen = !phase.isSeen);
-                              state.saveProject(widget.project);
-                            },
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
-                            onPressed: () {
-                              setState(() => widget.project.phases.remove(phase));
-                              state.saveProject(widget.project);
-                            },
-                          ),
-                        ],
-                      ),
-                      onTap: () {
-                        setState(() => phase.isSeen = true);
-                        state.saveProject(widget.project);
-                        player.seek(Duration(milliseconds: (phase.timestamp * 1000).toInt()));
-                        player.play();
-                      },
-                    ),
-                  );
-                },
+                    );
+                  },
+                ),
+        ),
+        Container(
+          padding: const EdgeInsets.all(8.0),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.3),
+            border: Border(top: BorderSide(color: Theme.of(context).dividerColor)),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: FilledButton(
+                  style: FilledButton.styleFrom(backgroundColor: const Color(0xFF2563EB), padding: const EdgeInsets.symmetric(vertical: 16)),
+                  onPressed: () => _showExportDialog(context, 'join'),
+                  child: const Text('Export Video', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
               ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: FilledButton(
+                  style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0D9488), padding: const EdgeInsets.symmetric(vertical: 16)),
+                  onPressed: () => _showExportDialog(context, 'separate'),
+                  child: const Text('Export Clips', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
+          ),
         ),
       ],
+    );
+  }
+
+  void _showExportDialog(BuildContext context, String mode) async {
+    final highlights = widget.project.phases.where((p) => p.isHighlight).toList();
+    if (highlights.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Δεν υπάρχουν Highlights για εξαγωγή!')));
+      return;
+    }
+
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (ctx) => ExportSettingsDialog(mode: mode),
+    );
+
+    if (result != null) {
+      _runExport(result, mode, highlights);
+    }
+  }
+
+  Future<void> _runExport(Map<String, dynamic> config, String mode, List<HighlightPhase> highlights) async {
+    final outDir = await FilePicker.platform.getDirectoryPath(dialogTitle: 'Επιλογή Φακέλου Αποθήκευσης');
+    if (outDir == null) return;
+
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => ExportProgressDialog(
+        project: widget.project,
+        highlights: highlights,
+        config: config,
+        mode: mode,
+        outDir: outDir,
+        startOffset: startOffset,
+        endOffset: endOffset,
+      ),
     );
   }
 
@@ -1407,39 +1950,65 @@ class _EditorScreenState extends State<EditorScreen> {
           const SizedBox(width: 8),
         ],
       ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final isWide = constraints.maxWidth > 800;
-          
-          if (isWide) {
-            return Row(
-              children: [
-                Expanded(
-                  flex: 3,
-                  child: _buildVideoPlayer(context),
-                ),
-                Container(width: 1, color: Theme.of(context).dividerColor),
-                Expanded(
-                  flex: 1,
-                  child: _buildSidePanel(context, state),
-                ),
-              ],
-            );
-          } else {
-            return Column(
-              children: [
-                Expanded(
-                  flex: 4,
-                  child: _buildVideoPlayer(context),
-                ),
-                Expanded(
-                  flex: 5,
-                  child: _buildSidePanel(context, state),
-                ),
-              ],
-            );
+      body: Focus(
+        autofocus: true,
+        onKeyEvent: (node, event) {
+          if (event is KeyDownEvent) {
+            if (event.logicalKey == LogicalKeyboardKey.space) {
+              player.playOrPause();
+              return KeyEventResult.handled;
+            } else if (event.logicalKey == LogicalKeyboardKey.keyH) {
+              if (currentPlayingPhase != null) {
+                setState(() {
+                  currentPlayingPhase!.isHighlight = !currentPlayingPhase!.isHighlight;
+                });
+                state.saveProject(widget.project);
+              }
+              return KeyEventResult.handled;
+            } else if (event.logicalKey == LogicalKeyboardKey.keyN) {
+              _navigate(1);
+              return KeyEventResult.handled;
+            } else if (event.logicalKey == LogicalKeyboardKey.keyG) {
+              _navigate(-1);
+              return KeyEventResult.handled;
+            }
           }
+          return KeyEventResult.ignored;
         },
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final isWide = constraints.maxWidth > 800;
+            
+            if (isWide) {
+              return Row(
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: _buildVideoPlayer(context),
+                  ),
+                  Container(width: 1, color: Theme.of(context).dividerColor),
+                  Expanded(
+                    flex: 1,
+                    child: _buildSidePanel(context, state),
+                  ),
+                ],
+              );
+            } else {
+              return Column(
+                children: [
+                  Expanded(
+                    flex: 4,
+                    child: _buildVideoPlayer(context),
+                  ),
+                  Expanded(
+                    flex: 5,
+                    child: _buildSidePanel(context, state),
+                  ),
+                ],
+              );
+            }
+          },
+        ),
       ),
     );
   }
