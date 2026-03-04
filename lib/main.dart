@@ -46,6 +46,7 @@ class Project {
   String id;
   String name;
   List<String> videoPaths;
+  List<double> videoDurations;
   List<HighlightPhase> phases;
   DateTime createdAt;
   double totalDuration;
@@ -54,16 +55,19 @@ class Project {
     required this.id,
     required this.name,
     required this.videoPaths,
+    List<double>? videoDurations,
     List<HighlightPhase>? phases,
     DateTime? createdAt,
     this.totalDuration = 0.0,
-  })  : phases = phases ?? [],
+  })  : videoDurations = videoDurations ?? [],
+        phases = phases ?? [],
         createdAt = createdAt ?? DateTime.now();
 
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,
         'videoPaths': videoPaths,
+        'videoDurations': videoDurations,
         'phases': phases.map((e) => e.toJson()).toList(),
         'createdAt': createdAt.toIso8601String(),
         'totalDuration': totalDuration,
@@ -73,6 +77,9 @@ class Project {
         id: json['id'],
         name: json['name'],
         videoPaths: List<String>.from(json['videoPaths']),
+        videoDurations: json['videoDurations'] != null 
+            ? List<double>.from(json['videoDurations'].map((x) => x.toDouble()))
+            : [],
         phases: (json['phases'] as List)
             .map((e) => HighlightPhase.fromJson(e))
             .toList(),
@@ -357,6 +364,7 @@ class AppState extends ChangeNotifier {
     await projectDir.create();
 
     double totalDur = 0.0;
+    List<double> videoDurations = [];
     final player = Player();
     
     List<double> allRms = [];
@@ -375,7 +383,9 @@ class AppState extends ChangeNotifier {
           if (player.state.duration != Duration.zero) break;
           await Future.delayed(const Duration(milliseconds: 100));
         }
-        totalDur += player.state.duration.inMilliseconds / 1000.0;
+        double dur = player.state.duration.inMilliseconds / 1000.0;
+        totalDur += dur;
+        videoDurations.add(dur);
 
         if (_isAnalysisCancelled) throw Exception('Cancelled');
         
@@ -476,6 +486,7 @@ class AppState extends ChangeNotifier {
         id: projectId,
         name: finalName,
         videoPaths: paths,
+        videoDurations: videoDurations,
         totalDuration: totalDur,
       );
 
@@ -1350,6 +1361,7 @@ class _EditorScreenState extends State<EditorScreen> {
 
   bool isPlaying = false;
   Duration duration = Duration.zero;
+  double globalPositionSeconds = 0.0;
   
   int activePhaseIndex = -1;
   HighlightPhase? currentPlayingPhase;
@@ -1395,13 +1407,32 @@ class _EditorScreenState extends State<EditorScreen> {
       if (mounted) setState(() => duration = d);
     });
     
+    if (widget.project.videoDurations.isEmpty && widget.project.videoPaths.isNotEmpty) {
+      double avg = widget.project.totalDuration / widget.project.videoPaths.length;
+      widget.project.videoDurations = List.filled(widget.project.videoPaths.length, avg);
+    }
+
     positionSub = player.stream.position.listen((pos) {
+      if (!mounted) return;
+      
+      int currentIndex = player.state.playlist.index;
+      if (currentIndex < 0) currentIndex = 0;
+      
+      double accumulated = 0.0;
+      for (int i = 0; i < currentIndex && i < widget.project.videoDurations.length; i++) {
+        accumulated += widget.project.videoDurations[i];
+      }
+      
+      double currentGlobalSec = accumulated + (pos.inMilliseconds / 1000.0);
+      setState(() {
+        globalPositionSeconds = currentGlobalSec;
+      });
+
       if (!isPlaying || currentPlayingPhase == null) return;
       
-      final currentSec = pos.inMilliseconds / 1000.0;
       final targetEnd = currentPlayingPhase!.timestamp + endOffset;
 
-      if (currentSec >= targetEnd) {
+      if (currentGlobalSec >= targetEnd) {
         if (autoplay) {
           _navigate(1);
         } else {
@@ -1411,7 +1442,8 @@ class _EditorScreenState extends State<EditorScreen> {
     });
     
     if (widget.project.videoPaths.isNotEmpty) {
-      player.open(Media(widget.project.videoPaths.first), play: false);
+      final playlist = Playlist(widget.project.videoPaths.map((p) => Media(p)).toList());
+      player.open(playlist, play: false);
     }
     
     _loadAnalysisData();
@@ -1509,7 +1541,32 @@ class _EditorScreenState extends State<EditorScreen> {
     }
   }
 
-  void _playPhase(int index, List<HighlightPhase> phases) {
+  Future<void> _seekGlobal(double targetSeconds) async {
+    double accumulated = 0.0;
+    for (int i = 0; i < widget.project.videoDurations.length; i++) {
+      double dur = widget.project.videoDurations[i];
+      if (targetSeconds <= accumulated + dur || i == widget.project.videoDurations.length - 1) {
+        double localSeconds = targetSeconds - accumulated;
+        if (localSeconds < 0) localSeconds = 0;
+        
+        if (player.state.playlist.index != i) {
+          await player.pause();
+          await player.jump(i);
+          
+          // Force a safe delay to allow media_kit to fully load the new video pipeline
+          await Future.delayed(const Duration(milliseconds: 600));
+          
+          await player.seek(Duration(milliseconds: (localSeconds * 1000).toInt()));
+        } else {
+          await player.seek(Duration(milliseconds: (localSeconds * 1000).toInt()));
+        }
+        break;
+      }
+      accumulated += dur;
+    }
+  }
+
+  Future<void> _playPhase(int index, List<HighlightPhase> phases) async {
     if (index < 0 || index >= phases.length) return;
     
     setState(() {
@@ -1521,8 +1578,8 @@ class _EditorScreenState extends State<EditorScreen> {
     Provider.of<AppState>(context, listen: false).saveProject(widget.project);
     
     double startSeconds = math.max(0.0, currentPlayingPhase!.timestamp - startOffset);
-    print('[PLAYBACK] Starting phase at ${startSeconds.toStringAsFixed(2)}s');
-    player.seek(Duration(milliseconds: (startSeconds * 1000).toInt()));
+    print('[PLAYBACK] Starting phase at ${startSeconds.toStringAsFixed(2)}s globally');
+    await _seekGlobal(startSeconds);
     player.play();
   }
 
@@ -1545,7 +1602,7 @@ class _EditorScreenState extends State<EditorScreen> {
 
   void _addManualHighlight() {
     final state = Provider.of<AppState>(context, listen: false);
-    final currentPos = player.state.position.inMilliseconds / 1000.0;
+    final currentPos = globalPositionSeconds;
     
     setState(() {
       widget.project.phases.add(HighlightPhase(
@@ -1603,25 +1660,22 @@ class _EditorScreenState extends State<EditorScreen> {
                     inactiveTrackColor: Theme.of(context).colorScheme.onSurface.withOpacity(0.2),
                     activeTrackColor: Theme.of(context).colorScheme.primary,
                   ),
-                  child: StreamBuilder<Duration>(
-                    stream: player.stream.position,
-                    builder: (context, snapshot) {
-                      final pos = snapshot.data ?? player.state.position;
-                      return Slider(
-                        value: pos.inMilliseconds.toDouble().clamp(0.0, duration.inMilliseconds > 0 ? duration.inMilliseconds.toDouble() : 1.0),
-                        max: duration.inMilliseconds > 0 ? duration.inMilliseconds.toDouble() : 1.0,
-                        onChanged: (v) => player.seek(Duration(milliseconds: v.toInt())),
-                      );
-                    }
+                  child: Slider(
+                    value: globalPositionSeconds.clamp(0.0, widget.project.totalDuration > 0 ? widget.project.totalDuration : 1.0),
+                    max: widget.project.totalDuration > 0 ? widget.project.totalDuration : 1.0,
+                    onChanged: (v) {
+                      setState(() => globalPositionSeconds = v);
+                      _seekGlobal(v);
+                    },
                   ),
                 ),
               ),
               const SizedBox(width: 8),
-              StreamBuilder<Duration>(
-                stream: player.stream.position,
-                builder: (context, snapshot) {
-                  final pos = snapshot.data ?? player.state.position;
-                  return Text('${_formatDuration(pos)} / ${_formatDuration(duration)}', style: const TextStyle(fontWeight: FontWeight.bold));
+              Builder(
+                builder: (context) {
+                  final posDuration = Duration(milliseconds: (globalPositionSeconds * 1000).toInt());
+                  final totalDur = Duration(milliseconds: (widget.project.totalDuration * 1000).toInt());
+                  return Text('${_formatDuration(posDuration)} / ${_formatDuration(totalDur)}', style: const TextStyle(fontWeight: FontWeight.bold));
                 }
               ),
             ],
