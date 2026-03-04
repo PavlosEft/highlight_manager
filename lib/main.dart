@@ -22,23 +22,35 @@ class HighlightPhase {
   double timestamp;
   bool isHighlight;
   bool isSeen;
+  bool isSelected;
+  double? customStartOffset;
+  double? customEndOffset;
 
   HighlightPhase({
     required this.timestamp,
     this.isHighlight = false,
     this.isSeen = false,
+    this.isSelected = true,
+    this.customStartOffset,
+    this.customEndOffset,
   });
 
   Map<String, dynamic> toJson() => {
         'timestamp': timestamp,
         'isHighlight': isHighlight,
         'isSeen': isSeen,
+        'isSelected': isSelected,
+        'customStartOffset': customStartOffset,
+        'customEndOffset': customEndOffset,
       };
 
   factory HighlightPhase.fromJson(Map<String, dynamic> json) => HighlightPhase(
         timestamp: json['timestamp'].toDouble(),
         isHighlight: json['isHighlight'] ?? false,
         isSeen: json['isSeen'] ?? false,
+        isSelected: json['isSelected'] ?? true,
+        customStartOffset: json['customStartOffset']?.toDouble(),
+        customEndOffset: json['customEndOffset']?.toDouble(),
       );
 }
 
@@ -1232,9 +1244,11 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
           });
 
           final ts = widget.highlights[i].timestamp;
-          final startGlobal = math.max(0.0, ts - widget.startOffset);
+          final cStart = widget.highlights[i].customStartOffset ?? widget.startOffset;
+          final cEnd = widget.highlights[i].customEndOffset ?? widget.endOffset;
+          final startGlobal = math.max(0.0, ts - cStart);
           final localData = _getLocalVideoData(startGlobal);
-          final dur = widget.startOffset + widget.endOffset + 0.5;
+          final dur = cStart + cEnd + 0.5;
           final outPath = '${clipsDir.path}/clip_${i + 1}.mp4';
 
           final args = [
@@ -1275,9 +1289,11 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
           });
 
           final ts = widget.highlights[i].timestamp;
-          final startGlobal = math.max(0.0, ts - widget.startOffset);
+          final cStart = widget.highlights[i].customStartOffset ?? widget.startOffset;
+          final cEnd = widget.highlights[i].customEndOffset ?? widget.endOffset;
+          final startGlobal = math.max(0.0, ts - cStart);
           final localData = _getLocalVideoData(startGlobal);
-          final dur = widget.startOffset + widget.endOffset + 0.5;
+          final dur = cStart + cEnd + 0.5;
           final clipTemp = '${tempDir.path}/part_$i.mp4';
 
           final args = [
@@ -1448,7 +1464,7 @@ class _EditorScreenState extends State<EditorScreen> {
 
       if (!isPlaying || currentPlayingPhase == null) return;
       
-      final targetEnd = currentPlayingPhase!.timestamp + endOffset;
+      final targetEnd = currentPlayingPhase!.timestamp + (currentPlayingPhase!.customEndOffset ?? endOffset);
 
       if (currentGlobalSec >= targetEnd) {
         if (autoplay) {
@@ -1595,7 +1611,7 @@ class _EditorScreenState extends State<EditorScreen> {
     
     Provider.of<AppState>(context, listen: false).saveProject(widget.project);
     
-    double startSeconds = math.max(0.0, currentPlayingPhase!.timestamp - startOffset);
+    double startSeconds = math.max(0.0, currentPlayingPhase!.timestamp - (currentPlayingPhase!.customStartOffset ?? startOffset));
     print('[PLAYBACK] Starting phase at ${startSeconds.toStringAsFixed(2)}s globally');
     await _seekGlobal(startSeconds);
     player.play();
@@ -1616,6 +1632,32 @@ class _EditorScreenState extends State<EditorScreen> {
     int s = d.inSeconds.remainder(60);
     if (h > 0) return "${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}";
     return "${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}";
+  }
+
+  void _adjustOffset(HighlightPhase phase, String type, double delta, AppState state) {
+    setState(() {
+      if (type == 'start') {
+        double current = phase.customStartOffset ?? startOffset;
+        phase.customStartOffset = math.max(0.0, current + delta);
+      } else {
+        double current = phase.customEndOffset ?? endOffset;
+        phase.customEndOffset = math.max(0.0, current + delta);
+      }
+      currentPlayingPhase = phase;
+      activePhaseIndex = widget.project.phases.indexOf(phase);
+      phase.isSeen = true;
+    });
+    state.saveProject(widget.project);
+    
+    double previewStart = math.max(0.0, phase.timestamp - (phase.customStartOffset ?? startOffset));
+    if (type == 'end') {
+      double previewEnd = phase.timestamp + (phase.customEndOffset ?? endOffset);
+      previewStart = math.max(0.0, previewEnd - 2.0);
+    }
+    
+    _seekGlobal(previewStart).then((_) {
+      player.play();
+    });
   }
 
   void _addManualHighlight() {
@@ -1886,15 +1928,28 @@ class _EditorScreenState extends State<EditorScreen> {
                       ),
                       child: ListTile(
                         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
-                        leading: IconButton(
-                          icon: Icon(
-                            phase.isHighlight ? Icons.star : Icons.star_border,
-                            color: phase.isHighlight ? Colors.amber : Colors.grey,
-                          ),
-                          onPressed: () {
-                            setState(() => phase.isHighlight = !phase.isHighlight);
-                            state.saveProject(widget.project);
-                          },
+                        leading: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (phase.isHighlight)
+                              Checkbox(
+                                value: phase.isSelected,
+                                onChanged: (v) {
+                                  setState(() => phase.isSelected = v ?? true);
+                                  state.saveProject(widget.project);
+                                },
+                              ),
+                            IconButton(
+                              icon: Icon(
+                                phase.isHighlight ? Icons.star : Icons.star_border,
+                                color: phase.isHighlight ? Colors.amber : Colors.grey,
+                              ),
+                              onPressed: () {
+                                setState(() => phase.isHighlight = !phase.isHighlight);
+                                state.saveProject(widget.project);
+                              },
+                            ),
+                          ],
                         ),
                         title: Text(
                           '$m:$s', 
@@ -1904,6 +1959,49 @@ class _EditorScreenState extends State<EditorScreen> {
                             color: phase.isSeen && !isActive ? Colors.grey : (isActive ? (isDark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C)) : null)
                           )
                         ),
+                        subtitle: phase.isHighlight ? Padding(
+                          padding: const EdgeInsets.only(top: 4.0, bottom: 4.0),
+                          child: Row(
+                            children: [
+                              InkWell(
+                                onTap: () {
+                                  setState(() {
+                                    phase.customStartOffset = null;
+                                    phase.customEndOffset = null;
+                                  });
+                                  state.saveProject(widget.project);
+                                },
+                                child: const Icon(Icons.refresh, size: 16, color: Colors.grey),
+                              ),
+                              const SizedBox(width: 12),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                decoration: BoxDecoration(border: Border.all(color: Colors.grey.withOpacity(0.5)), borderRadius: BorderRadius.circular(4)),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    InkWell(onTap: () => _adjustOffset(phase, 'start', 1.0, state), child: const Icon(Icons.arrow_left, size: 18)),
+                                    SizedBox(width: 20, child: Text('${(phase.customStartOffset ?? startOffset).toInt()}s', textAlign: TextAlign.center, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold))),
+                                    InkWell(onTap: () => _adjustOffset(phase, 'start', -1.0, state), child: const Icon(Icons.arrow_right, size: 18)),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                decoration: BoxDecoration(border: Border.all(color: Colors.grey.withOpacity(0.5)), borderRadius: BorderRadius.circular(4)),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    InkWell(onTap: () => _adjustOffset(phase, 'end', -1.0, state), child: const Icon(Icons.arrow_left, size: 18)),
+                                    SizedBox(width: 20, child: Text('${(phase.customEndOffset ?? endOffset).toInt()}s', textAlign: TextAlign.center, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold))),
+                                    InkWell(onTap: () => _adjustOffset(phase, 'end', 1.0, state), child: const Icon(Icons.arrow_right, size: 18)),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ) : null,
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -1966,9 +2064,9 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   void _showExportDialog(BuildContext context, String mode) async {
-    final highlights = widget.project.phases.where((p) => p.isHighlight).toList();
+    final highlights = widget.project.phases.where((p) => p.isHighlight && p.isSelected).toList();
     if (highlights.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Δεν υπάρχουν Highlights για εξαγωγή!')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Δεν υπάρχουν επιλεγμένα Highlights για εξαγωγή!')));
       return;
     }
 

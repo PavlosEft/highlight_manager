@@ -5,14 +5,8 @@
 Για το κάθε ένα θα συζητάμε πρώτα τι θα υλοποιήσουμε θα σου δίνω το okay για να μου δώσεις αλλαγές και θα μου λες και τι να δοκιμάσω σχετικά με αυτές τις αλλαγές
 
 
-1. Κρίσιμες Ελλείψεις στον Πυρήνα (Multi-Video Playback & Export)
-Αυτή είναι η πιο βασική διαφορά που επηρεάζει τη λειτουργικότητα του προγράμματος.
 
-Αναπαραγωγή πολλαπλών βίντεο στον Editor: Στο Python, το seek_global_time υπολογίζει σε ποιο βίντεο (part) ανήκει το κάθε timestamp και αλλάζει δυναμικά το source του Player (self.video_map). Στο Flutter (γραμμή 1092), φορτώνεται σκληρά μόνο το πρώτο βίντεο (player.open(Media(widget.project.videoPaths.first))). Τα υπόλοιπα βίντεο του project απλά αγνοούνται κατά το playback.
-
-Εξαγωγή πολλαπλών βίντεο: Αντίστοιχα, στο Export του Flutter , χρησιμοποιείται ξανά μόνο το πρώτο βίντεο (final videoPath = widget.project.videoPaths.first;). Το Python backend κάνει πολύπλοκους υπολογισμούς για να βρει ποιο κομμάτι βίντεο πρέπει να κόψει ανάλογα με τον παγκόσμιο χρόνο (global time).
-
-2. Έλεγχος των Highlights (Offsets & Undo/Redo)
+Έλεγχος των Highlights (Offsets & Undo/Redo)
 Το Python project προσφέρει πολύ πιο granular έλεγχο στο χρήστη όσον αφορά την επεξεργασία των φάσεων.
 
 Custom (Ατομικά) Offsets ανά Highlight: Στο Python, κάθε highlight έχει τα δικά του βελάκια ◀ 2s ▶ και ◀ 3s ▶ για να ρυθμίζει ο χρήστης το start/end offset μεμονωμένα (και κουμπί ↺ για επαναφορά). Στο Flutter υπάρχουν μόνο τα γενικά (global) sliders.
