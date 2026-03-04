@@ -1951,29 +1951,10 @@ class _EditorScreenState extends State<EditorScreen> {
                             ),
                           ],
                         ),
-                        title: Text(
-                          '$m:$s', 
-                          style: TextStyle(
-                            fontWeight: isActive ? FontWeight.bold : FontWeight.normal, 
-                            decoration: phase.isSeen && !isActive ? TextDecoration.lineThrough : null,
-                            color: phase.isSeen && !isActive ? Colors.grey : (isActive ? (isDark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C)) : null)
-                          )
-                        ),
-                        subtitle: phase.isHighlight ? Padding(
-                          padding: const EdgeInsets.only(top: 4.0, bottom: 4.0),
+                        title: phase.isHighlight ? SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
                           child: Row(
                             children: [
-                              InkWell(
-                                onTap: () {
-                                  setState(() {
-                                    phase.customStartOffset = null;
-                                    phase.customEndOffset = null;
-                                  });
-                                  state.saveProject(widget.project);
-                                },
-                                child: const Icon(Icons.refresh, size: 16, color: Colors.grey),
-                              ),
-                              const SizedBox(width: 12),
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                                 decoration: BoxDecoration(border: Border.all(color: Colors.grey.withOpacity(0.5)), borderRadius: BorderRadius.circular(4)),
@@ -1986,7 +1967,16 @@ class _EditorScreenState extends State<EditorScreen> {
                                   ],
                                 ),
                               ),
-                              const SizedBox(width: 8),
+                              const SizedBox(width: 12),
+                              Text(
+                                '$m:$s', 
+                                style: TextStyle(
+                                  fontWeight: isActive ? FontWeight.bold : FontWeight.normal, 
+                                  decoration: phase.isSeen && !isActive ? TextDecoration.lineThrough : null,
+                                  color: phase.isSeen && !isActive ? Colors.grey : (isActive ? (isDark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C)) : null)
+                                )
+                              ),
+                              const SizedBox(width: 12),
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                                 decoration: BoxDecoration(border: Border.all(color: Colors.grey.withOpacity(0.5)), borderRadius: BorderRadius.circular(4)),
@@ -1999,9 +1989,27 @@ class _EditorScreenState extends State<EditorScreen> {
                                   ],
                                 ),
                               ),
+                              const SizedBox(width: 8),
+                              InkWell(
+                                onTap: () {
+                                  setState(() {
+                                    phase.customStartOffset = null;
+                                    phase.customEndOffset = null;
+                                  });
+                                  state.saveProject(widget.project);
+                                },
+                                child: const Icon(Icons.refresh, size: 16, color: Colors.grey),
+                              ),
                             ],
                           ),
-                        ) : null,
+                        ) : Text(
+                          '$m:$s', 
+                          style: TextStyle(
+                            fontWeight: isActive ? FontWeight.bold : FontWeight.normal, 
+                            decoration: phase.isSeen && !isActive ? TextDecoration.lineThrough : null,
+                            color: phase.isSeen && !isActive ? Colors.grey : (isActive ? (isDark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C)) : null)
+                          )
+                        ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
