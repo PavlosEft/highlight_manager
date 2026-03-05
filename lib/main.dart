@@ -1416,7 +1416,6 @@ class _EditorScreenState extends State<EditorScreen> {
   
   // --- Filters ---
   bool showHighlightsOnly = false;
-  bool hideSeenPhases = false;
 
   // --- Analysis Data ---
   List<double> rmsData = [];
@@ -1559,10 +1558,6 @@ class _EditorScreenState extends State<EditorScreen> {
   List<HighlightPhase> get _filteredPhases {
     return widget.project.phases.where((p) {
       if (showHighlightsOnly && !p.isHighlight) return false;
-      if (hideSeenPhases && p.isSeen) {
-        if (p == currentPlayingPhase && isTrackingPhase) return true;
-        return false;
-      }
       return true;
     }).toList();
   }
@@ -1984,17 +1979,6 @@ class _EditorScreenState extends State<EditorScreen> {
               ),
               const SizedBox(width: 4),
               Expanded(
-                child: OutlinedButton(
-                  style: OutlinedButton.styleFrom(
-                    backgroundColor: hideSeenPhases ? Theme.of(context).colorScheme.primaryContainer : null,
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                  ),
-                  onPressed: () => setState(() => hideSeenPhases = !hideSeenPhases),
-                  child: Text('Hide Seen', style: TextStyle(fontSize: 11, fontWeight: hideSeenPhases ? FontWeight.bold : FontWeight.normal)),
-                ),
-              ),
-              const SizedBox(width: 4),
-              Expanded(
                 child: FilledButton(
                   style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 8)),
                   onPressed: _addManualHighlight,
@@ -2010,20 +1994,24 @@ class _EditorScreenState extends State<EditorScreen> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                children: [
-                  Checkbox(
-                    value: _areAllHighlightsSelected(),
-                    onChanged: _toggleAllHighlights,
-                  ),
-                  const Text('Επιλογή Όλων', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                ],
-              ),
-              TextButton.icon(
-                onPressed: _resetSeen,
-                icon: const Icon(Icons.cleaning_services, size: 16),
-                label: const Text('Reset Seen', style: TextStyle(fontSize: 12)),
-              ),
+              if (showHighlightsOnly)
+                Row(
+                  children: [
+                    Checkbox(
+                      value: _areAllHighlightsSelected(),
+                      onChanged: _toggleAllHighlights,
+                    ),
+                    const Text('Επιλογή Όλων', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  ],
+                )
+              else
+                const SizedBox.shrink(),
+              if (!showHighlightsOnly)
+                TextButton.icon(
+                  onPressed: _resetSeen,
+                  icon: const Icon(Icons.cleaning_services, size: 16),
+                  label: const Text('Reset Seen', style: TextStyle(fontSize: 12)),
+                ),
             ],
           ),
         ),
@@ -2080,7 +2068,7 @@ class _EditorScreenState extends State<EditorScreen> {
                         leading: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            if (phase.isHighlight)
+                            if (showHighlightsOnly && phase.isHighlight)
                               Checkbox(
                                 value: phase.isSelected,
                                 onChanged: (v) {
@@ -2200,15 +2188,16 @@ class _EditorScreenState extends State<EditorScreen> {
                   },
                 ),
         ),
-        Container(
-          padding: const EdgeInsets.all(8.0),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.3),
-            border: Border(top: BorderSide(color: Theme.of(context).dividerColor)),
-          ),
-          child: Row(
-            children: [
-              Expanded(
+        if (showHighlightsOnly)
+          Container(
+            padding: const EdgeInsets.all(8.0),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.3),
+              border: Border(top: BorderSide(color: Theme.of(context).dividerColor)),
+            ),
+            child: Row(
+              children: [
+                Expanded(
                 child: FilledButton(
                   style: FilledButton.styleFrom(backgroundColor: const Color(0xFF2563EB), padding: const EdgeInsets.symmetric(vertical: 16)),
                   onPressed: () => _showExportDialog(context, 'join'),
