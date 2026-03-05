@@ -13,6 +13,7 @@ import 'package:ffmpeg_kit_flutter_min_gpl/return_code.dart';
 import 'package:flutter/services.dart';
 import 'dart:math' as math;
 import 'dart:typed_data';
+import 'package:window_manager/window_manager.dart';
 
 // ==========================================
 // 1. DATA MODELS (Τα δεδομένα μας)
@@ -553,9 +554,33 @@ class AppState extends ChangeNotifier {
 // 3. FRONTEND / UI
 // ==========================================
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
+  
+  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+    await windowManager.ensureInitialized();
+    final prefs = await SharedPreferences.getInstance();
+    final width = prefs.getDouble('win_w') ?? 1200.0;
+    final height = prefs.getDouble('win_h') ?? 800.0;
+    final posX = prefs.getDouble('win_x');
+    final posY = prefs.getDouble('win_y');
+
+    WindowOptions windowOptions = WindowOptions(
+      size: Size(width, height),
+      center: posX == null,
+      title: 'Highlight Manager',
+    );
+    
+    windowManager.waitUntilReadyToShow(windowOptions, () async {
+      await windowManager.show();
+      await windowManager.focus();
+      if (posX != null && posY != null) {
+        await windowManager.setPosition(Offset(posX, posY));
+      }
+    });
+  }
+
   runApp(
     ChangeNotifierProvider(
       create: (context) => AppState(),
@@ -564,8 +589,48 @@ void main() {
   );
 }
 
-class HighlightManagerApp extends StatelessWidget {
+class HighlightManagerApp extends StatefulWidget {
   const HighlightManagerApp({super.key});
+
+  @override
+  State<HighlightManagerApp> createState() => _HighlightManagerAppState();
+}
+
+class _HighlightManagerAppState extends State<HighlightManagerApp> with WindowListener {
+  Timer? _saveTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    windowManager.addListener(this);
+  }
+
+  @override
+  void dispose() {
+    windowManager.removeListener(this);
+    _saveTimer?.cancel();
+    super.dispose();
+  }
+
+  void _saveWindowBounds() {
+    _saveTimer?.cancel();
+    _saveTimer = Timer(const Duration(milliseconds: 500), () async {
+      if (!Platform.isWindows && !Platform.isLinux && !Platform.isMacOS) return;
+      final prefs = await SharedPreferences.getInstance();
+      final size = await windowManager.getSize();
+      final pos = await windowManager.getPosition();
+      await prefs.setDouble('win_w', size.width);
+      await prefs.setDouble('win_h', size.height);
+      await prefs.setDouble('win_x', pos.dx);
+      await prefs.setDouble('win_y', pos.dy);
+    });
+  }
+
+  @override
+  void onWindowResized() => _saveWindowBounds();
+
+  @override
+  void onWindowMoved() => _saveWindowBounds();
 
   @override
   Widget build(BuildContext context) {
@@ -1457,9 +1522,17 @@ class _EditorScreenState extends State<EditorScreen> {
   bool isLoadingAnalysis = true;
 
   final ScrollController _listScrollController = ScrollController();
+  double _sidebarWidth = 400.0;
 
   @override
   void initState() {
+    SharedPreferences.getInstance().then((prefs) {
+      if (mounted) {
+        setState(() {
+          _sidebarWidth = prefs.getDouble('sidebar_width') ?? 400.0;
+        });
+      }
+    });
     super.initState();
     sensitivity = widget.project.sensitivity;
     grouping = widget.project.grouping;
@@ -2204,68 +2277,72 @@ class _EditorScreenState extends State<EditorScreen> {
                             ),
                           ],
                         ),
-                        title: phase.isHighlight ? SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                                decoration: BoxDecoration(border: Border.all(color: Colors.grey.withOpacity(0.5)), borderRadius: BorderRadius.circular(4)),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    InkWell(onTap: () => _adjustOffset(phase, 'start', 1.0, state), child: const Icon(Icons.arrow_left, size: 18)),
-                                    SizedBox(width: 20, child: Text('${(phase.customStartOffset ?? startOffset).toInt()}s', textAlign: TextAlign.center, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold))),
-                                    InkWell(onTap: () => _adjustOffset(phase, 'start', -1.0, state), child: const Icon(Icons.arrow_right, size: 18)),
-                                  ],
+                        title: Center(
+                          child: phase.isHighlight ? SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                  decoration: BoxDecoration(border: Border.all(color: Colors.grey.withOpacity(0.5)), borderRadius: BorderRadius.circular(4)),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      InkWell(onTap: () => _adjustOffset(phase, 'start', 1.0, state), child: const Icon(Icons.arrow_left, size: 18)),
+                                      SizedBox(width: 20, child: Text('${(phase.customStartOffset ?? startOffset).toInt()}s', textAlign: TextAlign.center, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold))),
+                                      InkWell(onTap: () => _adjustOffset(phase, 'start', -1.0, state), child: const Icon(Icons.arrow_right, size: 18)),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(width: 12),
-                              Text(
-                                '(${widget.project.phases.indexOf(phase) + 1}) $m:$s', 
-                                style: TextStyle(
-                                  fontWeight: (isActive || isLastPlayed) ? FontWeight.bold : FontWeight.normal, 
-                                  decoration: phase.isSeen && !isActive && !isLastPlayed ? TextDecoration.lineThrough : null,
-                                  color: (isActive || isLastPlayed) 
-                                    ? (isActive ? (isDark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C)) : (isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706)))
-                                    : (phase.isSeen ? Colors.grey : null)
-                                )
-                              ),
-                              const SizedBox(width: 12),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                                decoration: BoxDecoration(border: Border.all(color: Colors.grey.withOpacity(0.5)), borderRadius: BorderRadius.circular(4)),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    InkWell(onTap: () => _adjustOffset(phase, 'end', -1.0, state), child: const Icon(Icons.arrow_left, size: 18)),
-                                    SizedBox(width: 20, child: Text('${(phase.customEndOffset ?? endOffset).toInt()}s', textAlign: TextAlign.center, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold))),
-                                    InkWell(onTap: () => _adjustOffset(phase, 'end', 1.0, state), child: const Icon(Icons.arrow_right, size: 18)),
-                                  ],
+                                const SizedBox(width: 12),
+                                Text(
+                                  '(${widget.project.phases.indexOf(phase) + 1}) $m:$s', 
+                                  style: TextStyle(
+                                    fontWeight: (isActive || isLastPlayed) ? FontWeight.bold : FontWeight.normal, 
+                                    decoration: phase.isSeen && !isActive && !isLastPlayed ? TextDecoration.lineThrough : null,
+                                    color: (isActive || isLastPlayed) 
+                                      ? (isActive ? (isDark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C)) : (isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706)))
+                                      : (phase.isSeen ? Colors.grey : null)
+                                  )
                                 ),
-                              ),
-                              const SizedBox(width: 8),
-                              InkWell(
-                                onTap: () {
-                                  setState(() {
-                                    phase.customStartOffset = null;
-                                    phase.customEndOffset = null;
-                                  });
-                                  state.saveProject(widget.project);
-                                },
-                                child: const Icon(Icons.refresh, size: 16, color: Colors.grey),
-                              ),
-                            ],
+                                const SizedBox(width: 12),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                  decoration: BoxDecoration(border: Border.all(color: Colors.grey.withOpacity(0.5)), borderRadius: BorderRadius.circular(4)),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      InkWell(onTap: () => _adjustOffset(phase, 'end', -1.0, state), child: const Icon(Icons.arrow_left, size: 18)),
+                                      SizedBox(width: 20, child: Text('${(phase.customEndOffset ?? endOffset).toInt()}s', textAlign: TextAlign.center, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold))),
+                                      InkWell(onTap: () => _adjustOffset(phase, 'end', 1.0, state), child: const Icon(Icons.arrow_right, size: 18)),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                InkWell(
+                                  onTap: () {
+                                    setState(() {
+                                      phase.customStartOffset = null;
+                                      phase.customEndOffset = null;
+                                    });
+                                    state.saveProject(widget.project);
+                                  },
+                                  child: const Icon(Icons.refresh, size: 16, color: Colors.grey),
+                                ),
+                              ],
+                            ),
+                          ) : Text(
+                            '(${widget.project.phases.indexOf(phase) + 1}) $m:$s', 
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontWeight: (isActive || isLastPlayed) ? FontWeight.bold : FontWeight.normal, 
+                              decoration: phase.isSeen && !isActive && !isLastPlayed ? TextDecoration.lineThrough : null,
+                              color: (isActive || isLastPlayed) 
+                                  ? (isActive ? (isDark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C)) : (isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706)))
+                                  : (phase.isSeen ? Colors.grey : null)
+                            )
                           ),
-                        ) : Text(
-                          '(${widget.project.phases.indexOf(phase) + 1}) $m:$s', 
-                          style: TextStyle(
-                            fontWeight: (isActive || isLastPlayed) ? FontWeight.bold : FontWeight.normal, 
-                            decoration: phase.isSeen && !isActive && !isLastPlayed ? TextDecoration.lineThrough : null,
-                            color: (isActive || isLastPlayed) 
-                                ? (isActive ? (isDark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C)) : (isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706)))
-                                : (phase.isSeen ? Colors.grey : null)
-                          )
                         ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -2423,12 +2500,40 @@ class _EditorScreenState extends State<EditorScreen> {
               return Row(
                 children: [
                   Expanded(
-                    flex: 3,
                     child: _buildVideoPlayer(context),
                   ),
-                  Container(width: 1, color: Theme.of(context).dividerColor),
-                  Expanded(
-                    flex: 1,
+                  MouseRegion(
+                    cursor: SystemMouseCursors.resizeLeftRight,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onPanUpdate: (details) {
+                        setState(() {
+                          _sidebarWidth -= details.delta.dx;
+                          _sidebarWidth = _sidebarWidth.clamp(250.0, constraints.maxWidth - 400.0);
+                        });
+                      },
+                      onPanEnd: (details) async {
+                        final prefs = await SharedPreferences.getInstance();
+                        await prefs.setDouble('sidebar_width', _sidebarWidth);
+                      },
+                      child: Container(
+                        width: 8,
+                        color: Theme.of(context).dividerColor.withOpacity(0.5),
+                        child: Center(
+                          child: Container(
+                            width: 2,
+                            height: 30,
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3),
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    width: _sidebarWidth,
                     child: _buildSidePanel(context, state),
                   ),
                 ],

@@ -17,6 +17,7 @@ dependencies:
   provider: ^6.1.5+1
   shared_preferences: ^2.2.2
   ffmpeg_kit_flutter_min_gpl: ^6.0.3
+  window_manager: ^0.4.3
 
 dev_dependencies:
   flutter_test:
