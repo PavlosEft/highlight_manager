@@ -62,6 +62,14 @@ class Project {
   List<HighlightPhase> phases;
   DateTime createdAt;
   double totalDuration;
+  double sensitivity;
+  double grouping;
+  double startOffset;
+  double endOffset;
+  bool autoplay;
+  bool skipSeen;
+  bool showHighlightsOnly;
+  int lastActivePhaseIndex;
 
   Project({
     required this.id,
@@ -71,6 +79,14 @@ class Project {
     List<HighlightPhase>? phases,
     DateTime? createdAt,
     this.totalDuration = 0.0,
+    this.sensitivity = 55.0,
+    this.grouping = 2.0,
+    this.startOffset = 2.0,
+    this.endOffset = 3.0,
+    this.autoplay = false,
+    this.skipSeen = false,
+    this.showHighlightsOnly = false,
+    this.lastActivePhaseIndex = -1,
   })  : videoDurations = videoDurations ?? [],
         phases = phases ?? [],
         createdAt = createdAt ?? DateTime.now();
@@ -83,6 +99,14 @@ class Project {
         'phases': phases.map((e) => e.toJson()).toList(),
         'createdAt': createdAt.toIso8601String(),
         'totalDuration': totalDuration,
+        'sensitivity': sensitivity,
+        'grouping': grouping,
+        'startOffset': startOffset,
+        'endOffset': endOffset,
+        'autoplay': autoplay,
+        'skipSeen': skipSeen,
+        'showHighlightsOnly': showHighlightsOnly,
+        'lastActivePhaseIndex': lastActivePhaseIndex,
       };
 
   factory Project.fromJson(Map<String, dynamic> json) => Project(
@@ -97,6 +121,14 @@ class Project {
             .toList(),
         createdAt: DateTime.parse(json['createdAt']),
         totalDuration: json['totalDuration']?.toDouble() ?? 0.0,
+        sensitivity: json['sensitivity']?.toDouble() ?? 55.0,
+        grouping: json['grouping']?.toDouble() ?? 2.0,
+        startOffset: json['startOffset']?.toDouble() ?? 2.0,
+        endOffset: json['endOffset']?.toDouble() ?? 3.0,
+        autoplay: json['autoplay'] ?? false,
+        skipSeen: json['skipSeen'] ?? false,
+        showHighlightsOnly: json['showHighlightsOnly'] ?? false,
+        lastActivePhaseIndex: json['lastActivePhaseIndex'] ?? -1,
       );
 }
 
@@ -1407,15 +1439,15 @@ class _EditorScreenState extends State<EditorScreen> {
   List<HighlightPhase> forwardStack = [];
 
   // --- UI Settings State ---
-  double sensitivity = 55.0;
-  double grouping = 2.0;
-  double startOffset = 2.0;
-  double endOffset = 3.0;
-  bool autoplay = false;
-  bool skipSeen = false;
+  late double sensitivity;
+  late double grouping;
+  late double startOffset;
+  late double endOffset;
+  late bool autoplay;
+  late bool skipSeen;
   
   // --- Filters ---
-  bool showHighlightsOnly = false;
+  late bool showHighlightsOnly;
 
   // --- Analysis Data ---
   List<double> rmsData = [];
@@ -1429,6 +1461,14 @@ class _EditorScreenState extends State<EditorScreen> {
   @override
   void initState() {
     super.initState();
+    sensitivity = widget.project.sensitivity;
+    grouping = widget.project.grouping;
+    startOffset = widget.project.startOffset;
+    endOffset = widget.project.endOffset;
+    autoplay = widget.project.autoplay;
+    skipSeen = widget.project.skipSeen;
+    showHighlightsOnly = widget.project.showHighlightsOnly;
+
     player = Player();
     controller = VideoController(
       player,
@@ -1510,7 +1550,16 @@ class _EditorScreenState extends State<EditorScreen> {
     } catch (e) {
       debugPrint("Error loading analysis: $e");
     } finally {
-      if (mounted) setState(() => isLoadingAnalysis = false);
+      if (mounted) {
+        setState(() => isLoadingAnalysis = false);
+        if (widget.project.lastActivePhaseIndex >= 0 && widget.project.lastActivePhaseIndex < widget.project.phases.length) {
+          setState(() {
+            activePhaseIndex = widget.project.lastActivePhaseIndex;
+            currentPlayingPhase = widget.project.phases[activePhaseIndex];
+          });
+          _scrollToActivePhase();
+        }
+      }
     }
   }
 
@@ -1675,6 +1724,8 @@ class _EditorScreenState extends State<EditorScreen> {
       isAutoplaySuspended = false;
       isSeeking = true;
     });
+
+    widget.project.lastActivePhaseIndex = widget.project.phases.indexOf(currentPlayingPhase!);
 
     _scrollToActivePhase();
     
@@ -1918,7 +1969,10 @@ class _EditorScreenState extends State<EditorScreen> {
                         Text('Ευαισθησία: ${sensitivity.toInt()}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                         Slider(
                           value: sensitivity, max: 100,
-                          onChanged: (v) => setState(() => sensitivity = v),
+                          onChanged: (v) {
+                            setState(() => sensitivity = v);
+                            widget.project.sensitivity = v;
+                          },
                           onChangeEnd: (v) {
                             _recalcPhases();
                             Provider.of<AppState>(context, listen: false).saveProject(widget.project);
@@ -1934,7 +1988,10 @@ class _EditorScreenState extends State<EditorScreen> {
                         Text('Ομαδοποίηση: ${grouping.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                         Slider(
                           value: grouping, max: 10,
-                          onChanged: (v) => setState(() => grouping = v),
+                          onChanged: (v) {
+                            setState(() => grouping = v);
+                            widget.project.grouping = v;
+                          },
                           onChangeEnd: (v) {
                             _recalcPhases();
                             Provider.of<AppState>(context, listen: false).saveProject(widget.project);
@@ -1954,7 +2011,10 @@ class _EditorScreenState extends State<EditorScreen> {
                         Text('Start Offset: ${startOffset.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                         Slider(
                           value: startOffset, max: 10,
-                          onChanged: (v) => setState(() => startOffset = v),
+                          onChanged: (v) {
+                            setState(() => startOffset = v);
+                            widget.project.startOffset = v;
+                          },
                           onChangeEnd: (v) => Provider.of<AppState>(context, listen: false).saveProject(widget.project),
                         ),
                       ],
@@ -1967,7 +2027,10 @@ class _EditorScreenState extends State<EditorScreen> {
                         Text('End Offset: ${endOffset.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                         Slider(
                           value: endOffset, max: 10,
-                          onChanged: (v) => setState(() => endOffset = v),
+                          onChanged: (v) {
+                            setState(() => endOffset = v);
+                            widget.project.endOffset = v;
+                          },
                           onChangeEnd: (v) => Provider.of<AppState>(context, listen: false).saveProject(widget.project),
                         ),
                       ],
@@ -1980,13 +2043,21 @@ class _EditorScreenState extends State<EditorScreen> {
                 children: [
                   Row(
                     children: [
-                      Checkbox(value: autoplay, onChanged: (v) => setState(() => autoplay = v ?? false)),
+                      Checkbox(value: autoplay, onChanged: (v) {
+                        setState(() => autoplay = v ?? false);
+                        widget.project.autoplay = autoplay;
+                        Provider.of<AppState>(context, listen: false).saveProject(widget.project);
+                      }),
                       const Text('Autoplay', style: TextStyle(fontSize: 12)),
                     ],
                   ),
                   Row(
                     children: [
-                      Checkbox(value: skipSeen, onChanged: (v) => setState(() => skipSeen = v ?? false)),
+                      Checkbox(value: skipSeen, onChanged: (v) {
+                        setState(() => skipSeen = v ?? false);
+                        widget.project.skipSeen = skipSeen;
+                        Provider.of<AppState>(context, listen: false).saveProject(widget.project);
+                      }),
                       const Text('Skip Seen', style: TextStyle(fontSize: 12)),
                     ],
                   ),
@@ -2007,7 +2078,11 @@ class _EditorScreenState extends State<EditorScreen> {
                     backgroundColor: showHighlightsOnly ? Theme.of(context).colorScheme.primaryContainer : null,
                     padding: const EdgeInsets.symmetric(vertical: 8),
                   ),
-                  onPressed: () => setState(() => showHighlightsOnly = !showHighlightsOnly),
+                  onPressed: () {
+                    setState(() => showHighlightsOnly = !showHighlightsOnly);
+                    widget.project.showHighlightsOnly = showHighlightsOnly;
+                    Provider.of<AppState>(context, listen: false).saveProject(widget.project);
+                  },
                   child: Text('Highlights', style: TextStyle(fontSize: 11, fontWeight: showHighlightsOnly ? FontWeight.bold : FontWeight.normal)),
                 ),
               ),
