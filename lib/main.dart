@@ -1399,6 +1399,9 @@ class _EditorScreenState extends State<EditorScreen> {
   
   int activePhaseIndex = -1;
   HighlightPhase? currentPlayingPhase;
+  bool isTrackingPhase = false;
+  bool isAutoplaySuspended = false;
+  bool isSeeking = false;
   
   List<HighlightPhase> historyStack = [];
   List<HighlightPhase> forwardStack = [];
@@ -1465,14 +1468,16 @@ class _EditorScreenState extends State<EditorScreen> {
         globalPositionSeconds = currentGlobalSec;
       });
 
-      if (!isPlaying || currentPlayingPhase == null) return;
+      if (!isPlaying || currentPlayingPhase == null || !isTrackingPhase || isSeeking) return;
       
       final targetEnd = currentPlayingPhase!.timestamp + (currentPlayingPhase!.customEndOffset ?? endOffset);
 
       if (currentGlobalSec >= targetEnd) {
-        if (autoplay) {
+        if (currentGlobalSec > targetEnd + 2.0) return; // Αποτροπή skip από stream delay glitches (media_kit)
+        
+        if (autoplay && !isAutoplaySuspended) {
           _navigate(1, isAuto: true);
-        } else if (currentPlayingPhase!.isHighlight) {
+        } else if (currentPlayingPhase!.isHighlight && isTrackingPhase) {
           player.pause();
         }
       }
@@ -1554,7 +1559,10 @@ class _EditorScreenState extends State<EditorScreen> {
   List<HighlightPhase> get _filteredPhases {
     return widget.project.phases.where((p) {
       if (showHighlightsOnly && !p.isHighlight) return false;
-      if (hideSeenPhases && p.isSeen) return false;
+      if (hideSeenPhases && p.isSeen) {
+        if (p == currentPlayingPhase && isTrackingPhase) return true;
+        return false;
+      }
       return true;
     }).toList();
   }
@@ -1637,6 +1645,9 @@ class _EditorScreenState extends State<EditorScreen> {
       activePhaseIndex = index;
       currentPlayingPhase = phases[index];
       currentPlayingPhase!.isSeen = true;
+      isTrackingPhase = true;
+      isAutoplaySuspended = false;
+      isSeeking = true;
     });
     
     Provider.of<AppState>(context, listen: false).saveProject(widget.project);
@@ -1644,6 +1655,11 @@ class _EditorScreenState extends State<EditorScreen> {
     double startSeconds = math.max(0.0, currentPlayingPhase!.timestamp - (currentPlayingPhase!.customStartOffset ?? startOffset));
     print('[PLAYBACK] Starting phase at ${startSeconds.toStringAsFixed(2)}s globally');
     await _seekGlobal(startSeconds);
+    if (mounted) {
+      setState(() {
+        isSeeking = false;
+      });
+    }
     player.play();
   }
 
@@ -1674,8 +1690,11 @@ class _EditorScreenState extends State<EditorScreen> {
         phase.customEndOffset = math.max(0.0, current + delta);
       }
       currentPlayingPhase = phase;
-      activePhaseIndex = widget.project.phases.indexOf(phase);
+      activePhaseIndex = _filteredPhases.indexOf(phase);
       phase.isSeen = true;
+      isTrackingPhase = true;
+      isAutoplaySuspended = false;
+      isSeeking = true;
     });
     state.saveProject(widget.project);
     
@@ -1686,6 +1705,11 @@ class _EditorScreenState extends State<EditorScreen> {
     }
     
     _seekGlobal(previewStart).then((_) {
+      if (mounted) {
+        setState(() {
+          isSeeking = false;
+        });
+      }
       player.play();
     });
   }
@@ -1790,8 +1814,18 @@ class _EditorScreenState extends State<EditorScreen> {
                   child: Slider(
                     value: globalPositionSeconds.clamp(0.0, widget.project.totalDuration > 0 ? widget.project.totalDuration : 1.0),
                     max: widget.project.totalDuration > 0 ? widget.project.totalDuration : 1.0,
+                    onChangeStart: (v) {
+                      setState(() {
+                        isTrackingPhase = false;
+                        isAutoplaySuspended = true;
+                      });
+                    },
                     onChanged: (v) {
-                      setState(() => globalPositionSeconds = v);
+                      setState(() {
+                        globalPositionSeconds = v;
+                        isTrackingPhase = false;
+                        isAutoplaySuspended = true;
+                      });
                       double accumulated = 0.0;
                       for (int i = 0; i < widget.project.videoDurations.length; i++) {
                         double dur = widget.project.videoDurations[i];
@@ -1806,7 +1840,13 @@ class _EditorScreenState extends State<EditorScreen> {
                       }
                     },
                     onChangeEnd: (v) {
-                      _seekGlobal(v);
+                      setState(() {
+                        isTrackingPhase = false;
+                        isAutoplaySuspended = true;
+                      });
+                      _seekGlobal(v).then((_) {
+                        player.play();
+                      });
                     },
                   ),
                 ),
@@ -2002,11 +2042,14 @@ class _EditorScreenState extends State<EditorScreen> {
                     final s = (phase.timestamp % 60).toInt().toString().padLeft(2, '0');
                     
                     final isDark = Theme.of(context).brightness == Brightness.dark;
-                    final isActive = (index == activePhaseIndex && currentPlayingPhase == phase);
+                    final isActive = (index == activePhaseIndex && currentPlayingPhase == phase && isTrackingPhase);
+                    final isLastPlayed = (currentPlayingPhase == phase && !isTrackingPhase);
                     
                     Color bgColor;
                     if (isActive) {
                       bgColor = isDark ? const Color(0xFF7F1D1D) : const Color(0xFFFFE4E6);
+                    } else if (isLastPlayed) {
+                      bgColor = isDark ? const Color(0xFF78350F) : const Color(0xFFFEF3C7);
                     } else if (phase.isHighlight) {
                       bgColor = isDark ? const Color(0xFF4A148C) : const Color(0xFFF3E5F5);
                     } else {
@@ -2016,6 +2059,8 @@ class _EditorScreenState extends State<EditorScreen> {
                     Color borderColor;
                     if (isActive) {
                       borderColor = isDark ? const Color(0xFFFCA5A5) : const Color(0xFFEF4444);
+                    } else if (isLastPlayed) {
+                      borderColor = isDark ? const Color(0xFFFBBF24) : const Color(0xFFF59E0B);
                     } else if (phase.isHighlight) {
                       borderColor = Theme.of(context).colorScheme.primary;
                     } else {
@@ -2079,11 +2124,13 @@ class _EditorScreenState extends State<EditorScreen> {
                               ),
                               const SizedBox(width: 12),
                               Text(
-                                '$m:$s', 
+                                '(${widget.project.phases.indexOf(phase) + 1}) $m:$s', 
                                 style: TextStyle(
-                                  fontWeight: isActive ? FontWeight.bold : FontWeight.normal, 
-                                  decoration: phase.isSeen && !isActive ? TextDecoration.lineThrough : null,
-                                  color: phase.isSeen && !isActive ? Colors.grey : (isActive ? (isDark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C)) : null)
+                                  fontWeight: (isActive || isLastPlayed) ? FontWeight.bold : FontWeight.normal, 
+                                  decoration: phase.isSeen && !isActive && !isLastPlayed ? TextDecoration.lineThrough : null,
+                                  color: (isActive || isLastPlayed) 
+                                    ? (isActive ? (isDark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C)) : (isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706)))
+                                    : (phase.isSeen ? Colors.grey : null)
                                 )
                               ),
                               const SizedBox(width: 12),
@@ -2113,11 +2160,13 @@ class _EditorScreenState extends State<EditorScreen> {
                             ],
                           ),
                         ) : Text(
-                          '$m:$s', 
+                          '(${widget.project.phases.indexOf(phase) + 1}) $m:$s', 
                           style: TextStyle(
-                            fontWeight: isActive ? FontWeight.bold : FontWeight.normal, 
-                            decoration: phase.isSeen && !isActive ? TextDecoration.lineThrough : null,
-                            color: phase.isSeen && !isActive ? Colors.grey : (isActive ? (isDark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C)) : null)
+                            fontWeight: (isActive || isLastPlayed) ? FontWeight.bold : FontWeight.normal, 
+                            decoration: phase.isSeen && !isActive && !isLastPlayed ? TextDecoration.lineThrough : null,
+                            color: (isActive || isLastPlayed) 
+                                ? (isActive ? (isDark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C)) : (isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706)))
+                                : (phase.isSeen ? Colors.grey : null)
                           )
                         ),
                         trailing: Row(
