@@ -1618,7 +1618,9 @@ class _EditorScreenState extends State<EditorScreen> {
         rmsData = List<double>.from(data['rms'].map((x) => x.toDouble()));
         timesData = List<double>.from(data['times'].map((x) => x.toDouble()));
 
-        _recalcPhases();
+        if (widget.project.phases.isEmpty) {
+          _recalcPhases();
+        }
       }
     } catch (e) {
       debugPrint("Error loading analysis: $e");
@@ -1672,18 +1674,19 @@ class _EditorScreenState extends State<EditorScreen> {
       }
     }
 
-    finalPhases.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-
     setState(() {
       widget.project.phases = finalPhases;
     });
   }
 
   List<HighlightPhase> get _filteredPhases {
-    return widget.project.phases.where((p) {
-      if (showHighlightsOnly && !p.isHighlight) return false;
-      return true;
-    }).toList();
+    if (showHighlightsOnly) {
+      return widget.project.phases.where((p) => p.isHighlight).toList();
+    } else {
+      final list = widget.project.phases.toList();
+      list.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      return list;
+    }
   }
 
   void _navigate(int direction, {bool isAuto = false}) {
@@ -1876,7 +1879,6 @@ class _EditorScreenState extends State<EditorScreen> {
         timestamp: currentPos,
         isHighlight: true,
       ));
-      widget.project.phases.sort((a, b) => a.timestamp.compareTo(b.timestamp));
     });
     
     state.saveProject(widget.project);
@@ -2021,6 +2023,7 @@ class _EditorScreenState extends State<EditorScreen> {
 
   Widget _buildSidePanel(BuildContext context, AppState state) {
     final phases = _filteredPhases;
+    final chronologicalPhases = widget.project.phases.toList()..sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
     return Column(
       children: [
@@ -2188,7 +2191,18 @@ class _EditorScreenState extends State<EditorScreen> {
                 )
               else
                 const SizedBox.shrink(),
-              if (!showHighlightsOnly)
+              if (showHighlightsOnly)
+                TextButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      widget.project.phases.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+                    });
+                    Provider.of<AppState>(context, listen: false).saveProject(widget.project);
+                  },
+                  icon: const Icon(Icons.sort, size: 16),
+                  label: const Text('Επαναφορά Σειράς', style: TextStyle(fontSize: 12)),
+                )
+              else
                 TextButton.icon(
                   onPressed: _resetSeen,
                   icon: const Icon(Icons.cleaning_services, size: 16),
@@ -2204,8 +2218,22 @@ class _EditorScreenState extends State<EditorScreen> {
             ? const Center(child: CircularProgressIndicator())
             : phases.isEmpty 
               ? Center(child: Text('Δεν βρέθηκαν φάσεις', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5))))
-              : ListView.builder(
-                  controller: _listScrollController,
+              : ReorderableListView.builder(
+                  scrollController: _listScrollController,
+                  buildDefaultDragHandles: false,
+                  onReorder: (oldIndex, newIndex) {
+                    if (!showHighlightsOnly) return;
+                    setState(() {
+                      if (oldIndex < newIndex) newIndex -= 1;
+                      final highlights = widget.project.phases.where((p) => p.isHighlight).toList();
+                      final item = highlights.removeAt(oldIndex);
+                      highlights.insert(newIndex, item);
+                      
+                      final nonHighlights = widget.project.phases.where((p) => !p.isHighlight).toList();
+                      widget.project.phases = [...nonHighlights, ...highlights];
+                    });
+                    Provider.of<AppState>(context, listen: false).saveProject(widget.project);
+                  },
                   itemCount: phases.length,
                   itemBuilder: (context, index) {
                     final phase = phases[index];
@@ -2238,7 +2266,8 @@ class _EditorScreenState extends State<EditorScreen> {
                       borderColor = isDark ? Colors.grey.shade700 : Colors.grey.shade300;
                     }
                     
-                    return Card(
+                    Widget card = Card(
+                      key: ObjectKey(phase),
                       elevation: isDark ? 2 : 1,
                       color: bgColor,
                       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -2251,6 +2280,14 @@ class _EditorScreenState extends State<EditorScreen> {
                         leading: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
+                            if (showHighlightsOnly)
+                              ReorderableDragStartListener(
+                                index: index,
+                                child: const Padding(
+                                  padding: EdgeInsets.only(right: 4.0),
+                                  child: Icon(Icons.drag_indicator, color: Colors.grey),
+                                ),
+                              ),
                             if (showHighlightsOnly && phase.isHighlight)
                               Checkbox(
                                 value: phase.isSelected,
@@ -2297,7 +2334,7 @@ class _EditorScreenState extends State<EditorScreen> {
                                 ),
                                 const SizedBox(width: 12),
                                 Text(
-                                  '(${widget.project.phases.indexOf(phase) + 1}) $m:$s', 
+                                  '(${chronologicalPhases.indexOf(phase) + 1}) $m:$s', 
                                   style: TextStyle(
                                     fontWeight: (isActive || isLastPlayed) ? FontWeight.bold : FontWeight.normal, 
                                     decoration: phase.isSeen && !isActive && !isLastPlayed ? TextDecoration.lineThrough : null,
@@ -2333,7 +2370,7 @@ class _EditorScreenState extends State<EditorScreen> {
                               ],
                             ),
                           ) : Text(
-                            '(${widget.project.phases.indexOf(phase) + 1}) $m:$s', 
+                            '(${chronologicalPhases.indexOf(phase) + 1}) $m:$s', 
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               fontWeight: (isActive || isLastPlayed) ? FontWeight.bold : FontWeight.normal, 
@@ -2372,6 +2409,8 @@ class _EditorScreenState extends State<EditorScreen> {
                         onTap: () => _playPhase(index, phases),
                       ),
                     );
+
+                    return card;
                   },
                 ),
         ),
