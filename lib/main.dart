@@ -1424,6 +1424,8 @@ class _EditorScreenState extends State<EditorScreen> {
   double avgRms = 0.0;
   bool isLoadingAnalysis = true;
 
+  final ScrollController _listScrollController = ScrollController();
+
   @override
   void initState() {
     super.initState();
@@ -1628,6 +1630,35 @@ class _EditorScreenState extends State<EditorScreen> {
     }
   }
 
+  void _scrollToActivePhase() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_listScrollController.hasClients || currentPlayingPhase == null) return;
+      
+      final phases = _filteredPhases;
+      final int index = phases.indexOf(currentPlayingPhase!);
+      if (index < 0) return;
+      
+      // Το πραγματικό ύψος κάθε στοιχείου στα Windows είναι ακριβώς ~56px.
+      // Το προηγούμενο 64άρι δημιουργούσε αθροιστικό λάθος σε μεγάλα index,
+      // με αποτέλεσμα το scroll να πηγαίνει πιο κάτω και να κρύβει το στοιχείο προς τα πάνω!
+      const double itemHeight = 56.0; 
+      final double viewportHeight = _listScrollController.position.viewportDimension;
+      
+      // Στοχεύουμε στο κέντρο της οθόνης
+      double targetOffset = (index * itemHeight) - (viewportHeight / 2) + (itemHeight / 2);
+      
+      targetOffset = math.max(0.0, targetOffset);
+      // Αφαιρέθηκε ο αυστηρός περιορισμός maxScrollExtent, 
+      // γιατί κατά το build δεν έχει προλάβει πάντα να ενημερωθεί σωστά το μέγεθος.
+      
+      _listScrollController.animateTo(
+        targetOffset,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+      );
+    });
+  }
+
   Future<void> _playPhase(int index, List<HighlightPhase> phases, {bool recordHistory = true}) async {
     if (index < 0 || index >= phases.length) return;
     
@@ -1644,6 +1675,8 @@ class _EditorScreenState extends State<EditorScreen> {
       isAutoplaySuspended = false;
       isSeeking = true;
     });
+
+    _scrollToActivePhase();
     
     Provider.of<AppState>(context, listen: false).saveProject(widget.project);
     
@@ -1664,6 +1697,7 @@ class _EditorScreenState extends State<EditorScreen> {
     durationSub?.cancel();
     positionSub?.cancel();
     player.dispose();
+    _listScrollController.dispose();
     super.dispose();
   }
 
@@ -2023,6 +2057,7 @@ class _EditorScreenState extends State<EditorScreen> {
             : phases.isEmpty 
               ? Center(child: Text('Δεν βρέθηκαν φάσεις', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5))))
               : ListView.builder(
+                  controller: _listScrollController,
                   itemCount: phases.length,
                   itemBuilder: (context, index) {
                     final phase = phases[index];
