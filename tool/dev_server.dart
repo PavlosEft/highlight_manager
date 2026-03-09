@@ -6,7 +6,6 @@ List<Process> flutterProcesses = [];
 bool isConfirmingUndo = false;
 bool isConfirmingGit = false;
 bool isConfirmingBrowser = false;
-bool isApplyingPatch = false;
 Timer? debounceTimer;
 
 void main() async {
@@ -16,13 +15,14 @@ void main() async {
     // Κλείνει την εφαρμογή αν τρέχει ήδη στα Windows για να επιτρέψει το νέο build
     await Process.run('taskkill', ['/F', '/IM', 'highlight_manager.exe', '/T'], runInShell: true);
   } catch (_) {}
-  print('HIGHLIGHT MANAGER - PRO DEV SERVER');
+  print('HIGHLIGHT MANAGER - PRO DEV SERVER (Runner)');
   print('====================================================');
   print('ΣΥΝΤΟΜΕΥΣΕΙΣ ΠΛΗΚΤΡΟΛΟΓΙΟΥ:');
   print('  [c] - Create (OK) Zip: Μόνιμο Snapshot έξω, χωρίς να διαγράφεται.');
   print('  [g] - Git Push: Αυτόματο add, commit και push.');
   print('  [u] - Undo: Επαναφορά στην προηγούμενη έκδοση από το φάκελο Backups.');
   print('  [b] - Browser: Άνοιγμα της εφαρμογής στον Chrome (Web).');
+  print('  [a] - Attach: Επανασύνδεση στο κινητό (χωρίς νέο build).');
   print('-----------------------------------------------------');
   print('  [r] - Hot Reload: Εφαρμογή αλλαγών κώδικα ακαριαία (μόνο σε Debug).');
   print('  [R] - Hot Restart: Πλήρης επανεκκίνηση της εφαρμογής.');
@@ -38,11 +38,25 @@ void main() async {
     exit(0);
   });
 
-  print('Εκκίνηση εφαρμογής (Windows)');
-  final p = await Process.start('flutter', ['run', '-d', 'windows'], runInShell: true);
+  print('🔍 Έλεγχος συσκευών (παίρνει ~1-2 δευτερόλεπτα)...');
+  String targetDevice = 'windows';
+  try {
+    final result = await Process.run('flutter', ['devices'], runInShell: true);
+    if (result.stdout.toString().contains('L8AIB761L865GB7')) {
+      targetDevice = 'L8AIB761L865GB7';
+      print('📱 Βρέθηκε συνδεδεμένο κινητό! Εκκίνηση στο Android...');
+    } else {
+      print('💻 Το κινητό δεν βρέθηκε. Εκκίνηση στα Windows...');
+    }
+  } catch (e) {
+    print('💻 Σφάλμα ανίχνευσης. Προεπιλογή στα Windows...');
+  }
+
+  final p = await Process.start('flutter', ['run', '-d', targetDevice], runInShell: true);
   flutterProcesses.add(p);
-  p.stdout.transform(utf8.decoder).listen((data) => stdout.write('[windows] $data'));
-  p.stderr.transform(utf8.decoder).listen((data) => stderr.write('[windows] $data'));
+  final logPrefix = targetDevice == 'windows' ? 'windows' : 'android';
+  p.stdout.transform(utf8.decoder).listen((data) => stdout.write('[$logPrefix] $data'));
+  p.stderr.transform(utf8.decoder).listen((data) => stderr.write('[$logPrefix] $data'));
 
   try {
     stdin.lineMode = false;
@@ -82,15 +96,15 @@ void main() async {
     } else if (input == 'b') {
       isConfirmingBrowser = true;
       stdout.write('\n⚠️ [BROWSER] Να ανοίξει η εφαρμογή και στον Chrome; (y/n): ');
+    } else if (input == 'a') {
+      handleAttach();
     } else {
       for (var p in flutterProcesses) p.stdin.add(event);
     }
   });
 
-  String lastClipboard = await getClipboard();
-
   void handleManualSave(FileSystemEvent event) {
-    if (isConfirmingUndo || isApplyingPatch) return;
+    if (isConfirmingUndo) return;
     
     final path = event.path.replaceAll('\\', '/');
     if (path.endsWith('.zip') || path.contains('Backups')) return;
@@ -110,53 +124,11 @@ void main() async {
   if (Directory('tool').existsSync()) {
     Directory('tool').watch(recursive: true).listen(handleManualSave);
   }
-
-  Timer.periodic(const Duration(seconds: 1), (timer) async {
-    if (isConfirmingUndo || isConfirmingGit) return;
-
-    final clipboard = await getClipboard();
-    if (clipboard.isNotEmpty && clipboard != lastClipboard && clipboard.contains('<HM_PATCH>')) {
-      lastClipboard = clipboard;
-      print('\n✨ [AI PATCHER] Νέος κώδικας εντοπίστηκε!');
-      
-      isApplyingPatch = true; 
-
-      bool success = applyPatch(clipboard);
-      
-      if (success) {
-        await Future.delayed(const Duration(milliseconds: 300)); 
-        await manageZipsBeforePatch();
-        await createCurrentZip();
-        print('[AI PATCHER] Hot Reload...');
-        for (var p in flutterProcesses) p.stdin.write('r');
-      } else {
-        print('⚠️ Η εφαρμογή ακυρώθηκε. Κανένα αρχείο ή Zip δεν πειράχτηκε.');
-      }
-
-      Future.delayed(const Duration(seconds: 1), () {
-        isApplyingPatch = false;
-      });
-    }
-  });
-}
-
-Future<String> getClipboard() async {
-  try {
-    final result = await Process.run('powershell', [
-      '-NoProfile',
-      '-Command',
-      '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-Clipboard -Raw'
-    ], stdoutEncoding: utf8, runInShell: true);
-    return result.stdout.toString().trim();
-  } catch (e) {
-    return '';
-  }
 }
 
 Future<void> manageZipsBeforePatch() async {
   final rootFiles = Directory('.').listSync();
   for (var file in rootFiles) {
-    // Εξαιρούνται τα αρχεία που περιέχουν το "(OK)" από την μετακίνηση
     if (file is File && file.path.contains('SourceCode_') && file.path.endsWith('.zip') && !file.path.contains('(OK)')) {
       final fileName = file.path.split(Platform.pathSeparator).last;
       await file.rename('Backups/$fileName');
@@ -210,7 +182,6 @@ void handleUndoConfirmation(String input) async {
     
     final rootFiles = Directory('.').listSync();
     for (var file in rootFiles) {
-      // Καθαρίζουμε τα κανονικά zips αλλά αφήνουμε ανέπαφα τα (OK)
       if (file is File && file.path.contains('SourceCode_') && file.path.endsWith('.zip') && !file.path.contains('(OK)')) {
         file.deleteSync();
       }
@@ -258,14 +229,10 @@ void handleGitConfirmation(String input) async {
     final now = DateTime.now();
     final timestamp = "${now.day}/${now.month}/${now.year} ${now.hour}:${now.minute}:${now.second}";
     
-    // Προσθήκη όλων των αλλαγών
     await Process.run('git', ['add', '.'], runInShell: true);
-    
-    // Αυτόματο Commit
     final commitResult = await Process.run('git', ['commit', '-m', 'Auto commit from dev server - $timestamp'], runInShell: true);
     print(commitResult.stdout);
     
-    // Push
     final pushResult = await Process.run('git', ['push'], runInShell: true);
     if (pushResult.exitCode == 0) {
       print('✅ [GIT] Το Push ολοκληρώθηκε με επιτυχία!');
@@ -278,59 +245,22 @@ void handleGitConfirmation(String input) async {
   isConfirmingGit = false;
 }
 
-bool applyPatch(String rawClipboard) {
+void handleAttach() async {
+  print('\n⏳ Εκκίνηση Attach... Ψάχνω για τη συσκευή...');
+  String targetDevice = 'windows';
   try {
-    final text = rawClipboard.replaceAll('\r\n', '\n'); 
-    final patchRegex = RegExp(r'<HM_PATCH>(.*?)</HM_PATCH>', dotAll: true);
-    final patches = patchRegex.allMatches(text);
-
-    if (patches.isEmpty) return false;
-
-    Map<String, String> fileContents = {};
-    Map<String, String> newFileContents = {};
-
-    for (var match in patches) {
-      final patchContent = match.group(1)!;
-      final fileMatch = RegExp(r'<FILE>(.*?)</FILE>').firstMatch(patchContent);
-      final replaceMatch = RegExp(r'<REPLACE>\n?(.*?)\n?</REPLACE>', dotAll: true).firstMatch(patchContent);
-      final withMatch = RegExp(r'<WITH>\n?(.*?)\n?</WITH>', dotAll: true).firstMatch(patchContent);
-
-      if (fileMatch != null && replaceMatch != null && withMatch != null) {
-        final filename = fileMatch.group(1)!.trim();
-        final oldCode = replaceMatch.group(1)!;
-        final newCode = withMatch.group(1)!;
-
-        final file = File(filename);
-        if (!file.existsSync()) {
-          print('❌ Σφάλμα: Το αρχείο $filename δεν βρέθηκε. Ακύρωση αλλαγών.');
-          return false;
-        }
-
-        if (!fileContents.containsKey(filename)) {
-          fileContents[filename] = file.readAsStringSync().replaceAll('\r\n', '\n');
-          newFileContents[filename] = fileContents[filename]!;
-        }
-
-        if (newFileContents[filename]!.contains(oldCode)) {
-          newFileContents[filename] = newFileContents[filename]!.replaceFirst(oldCode, newCode);
-        } else {
-          print('❌ Σφάλμα: Δεν βρέθηκε ο κώδικας στο αρχείο $filename.');
-          return false;
-        }
-      } else {
-        return false;
-      }
+    final result = await Process.run('flutter', ['devices'], runInShell: true);
+    if (result.stdout.toString().contains('L8AIB761L865GB7')) {
+      targetDevice = 'L8AIB761L865GB7';
+      print('📱 Βρέθηκε το κινητό! Σύνδεση με το υπάρχον App...');
+    } else {
+      print('💻 Το κινητό δεν βρέθηκε. Προεπιλογή στα Windows...');
     }
+  } catch (e) {}
 
-    newFileContents.forEach((filename, content) {
-      File(filename).writeAsStringSync(content);
-      print('✅ Επιτυχής ενημέρωση: $filename');
-    });
-
-    return true;
-
-  } catch (e) {
-    print('❌ Απρόσμενο Σφάλμα: $e');
-  }
-  return false; 
+  final p = await Process.start('flutter', ['attach', '-d', targetDevice], runInShell: true);
+  flutterProcesses.add(p);
+  final logPrefix = targetDevice == 'windows' ? 'windows' : 'android';
+  p.stdout.transform(utf8.decoder).listen((data) => stdout.write('[$logPrefix-attach] $data'));
+  p.stderr.transform(utf8.decoder).listen((data) => stderr.write('[$logPrefix-attach] $data'));
 }

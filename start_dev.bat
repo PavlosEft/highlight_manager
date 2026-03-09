@@ -1,4 +1,6 @@
 @echo off
 title Flutter Smart Dev Server
+echo Starting AI Patcher in background...
+start cmd /k "title AI Patcher && dart run tool\ai_patcher.dart"
 echo Starting the App...
 cmd /k "dart run tool\dev_server.dart"

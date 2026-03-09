@@ -8,8 +8,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
-import 'package:ffmpeg_kit_flutter_min_gpl/ffmpeg_kit.dart';
-import 'package:ffmpeg_kit_flutter_min_gpl/return_code.dart';
+import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter_new_min/return_code.dart';
 import 'package:flutter/services.dart';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -788,10 +788,14 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
   @override
   Widget build(BuildContext context) {
     final t = widget.state.t;
+    final isDesktop = MediaQuery.of(context).size.width > 600;
     return AlertDialog(
+      insetPadding: EdgeInsets.symmetric(horizontal: isDesktop ? 24.0 : 4.0, vertical: isDesktop ? 24.0 : 4.0),
+      contentPadding: EdgeInsets.only(left: isDesktop ? 24.0 : 8.0, right: isDesktop ? 24.0 : 8.0, top: 16.0, bottom: isDesktop ? 24.0 : 0.0),
+      actionsPadding: EdgeInsets.only(bottom: isDesktop ? 16.0 : 4.0, right: isDesktop ? 24.0 : 8.0, top: 8.0),
       title: Text(t('new_project'), style: const TextStyle(fontWeight: FontWeight.bold)),
       content: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 600),
+        constraints: BoxConstraints(maxWidth: 600, maxHeight: MediaQuery.of(context).size.height * (isDesktop ? 0.9 : 0.98)),
         child: SizedBox(
           width: double.maxFinite,
           child: Column(
@@ -811,14 +815,16 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
             const SizedBox(height: 16),
             Row(
               children: [
-                FilledButton.icon(
-                  onPressed: _pickFiles,
-                  icon: const Icon(Icons.folder_open),
-                  label: Text(t('add_videos')),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: _pickFiles,
+                    icon: const Icon(Icons.folder_open),
+                    label: Text(t('add_videos')),
+                  ),
                 ),
-                const Spacer(),
-                if (_selectedPaths.isNotEmpty)
-                  TextButton.icon(
+                if (_selectedPaths.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  IconButton.filledTonal(
                     onPressed: () {
                       setState(() {
                         _selectedPaths.clear();
@@ -826,9 +832,10 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
                         _nameController.clear();
                       });
                     },
-                    icon: const Icon(Icons.clear, color: Colors.red),
-                    label: Text(t('clear_all'), style: const TextStyle(color: Colors.red)),
-                  )
+                    icon: const Icon(Icons.delete_outline, color: Colors.red),
+                    tooltip: t('clear_all'),
+                  ),
+                ]
               ],
             ),
             const SizedBox(height: 16),
@@ -836,36 +843,49 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
               Flexible(
                 child: Container(
                   decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey.withOpacity(0.3)),
+                    border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
                     borderRadius: BorderRadius.circular(8),
                   ),
+                  padding: const EdgeInsets.all(4.0),
                   child: ReorderableListView.builder(
                     shrinkWrap: true,
-                    buildDefaultDragHandles: false,
-                    itemCount: _selectedPaths.length,
-                    onReorder: (oldIndex, newIndex) {
-                      setState(() {
-                        if (oldIndex < newIndex) newIndex -= 1;
-                        final item = _selectedPaths.removeAt(oldIndex);
-                        _selectedPaths.insert(newIndex, item);
-                        if (!_userEditedName) _updateAutoName();
-                      });
-                    },
-                    itemBuilder: (context, index) {
-                      final path = _selectedPaths[index];
-                      final fileName = path.split(RegExp(r'[\\/]')).last;
-                      return ReorderableDelayedDragStartListener(
-                        key: ValueKey(path),
-                        index: index,
+                  buildDefaultDragHandles: false,
+                  itemCount: _selectedPaths.length,
+                  onReorder: (oldIndex, newIndex) {
+                    setState(() {
+                      if (oldIndex < newIndex) newIndex -= 1;
+                      final item = _selectedPaths.removeAt(oldIndex);
+                      _selectedPaths.insert(newIndex, item);
+                      if (!_userEditedName) _updateAutoName();
+                    });
+                  },
+                  itemBuilder: (context, index) {
+                    final path = _selectedPaths[index];
+                    final fileName = path.split(RegExp(r'[\\/]')).last;
+                    return ReorderableDelayedDragStartListener(
+                      key: ValueKey(path),
+                      index: index,
+                      child: Card(
+                        margin: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 2.0),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
                         child: ListTile(
+                          visualDensity: VisualDensity.compact,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 0.0),
+                          dense: true,
                           leading: CircleAvatar(
-                            radius: 14,
+                            radius: 12,
                             backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-                            child: Text('${index + 1}', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onPrimaryContainer, fontWeight: FontWeight.bold)),
+                            child: Text('${index + 1}', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onPrimaryContainer, fontWeight: FontWeight.bold)),
                           ),
-                          title: Text(fileName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14)),
+                          title: Text(fileName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13)),
                           trailing: IconButton(
-                            icon: Icon(Icons.delete_outline, size: 20, color: Theme.of(context).colorScheme.error),
+                            icon: Icon(Icons.delete_outline, size: 18, color: Theme.of(context).colorScheme.error),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
                             onPressed: () {
                               setState(() {
                                 _selectedPaths.removeAt(index);
@@ -874,11 +894,12 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
                             },
                           ),
                         ),
-                      );
-                    },
-                  ),
+                      ),
+                    );
+                  },
                 ),
-              )
+              ),
+            )
           ],
         ),
       ),
@@ -913,33 +934,43 @@ class HomeScreen extends StatelessWidget {
     final TextEditingController controller = TextEditingController(text: project.name);
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(state.t('rename_project'), style: const TextStyle(fontWeight: FontWeight.bold)),
-        content: TextField(
-          controller: controller,
-          minLines: 1,
-          maxLines: 4,
-          keyboardType: TextInputType.multiline,
-          decoration: InputDecoration(
-            labelText: state.t('new_name'),
-            border: const OutlineInputBorder(),
+      builder: (ctx) {
+        final isDesktop = MediaQuery.of(ctx).size.width > 600;
+        return AlertDialog(
+          insetPadding: EdgeInsets.symmetric(horizontal: isDesktop ? 24.0 : 12.0, vertical: 24.0),
+          titlePadding: EdgeInsets.only(left: isDesktop ? 24.0 : 16.0, right: isDesktop ? 24.0 : 16.0, top: 16.0, bottom: 8.0),
+          contentPadding: EdgeInsets.only(left: isDesktop ? 24.0 : 16.0, right: isDesktop ? 24.0 : 16.0, top: 8.0, bottom: 0.0),
+          actionsPadding: EdgeInsets.only(bottom: 12.0, right: isDesktop ? 24.0 : 12.0, top: 12.0),
+          title: Text(state.t('rename_project'), style: const TextStyle(fontWeight: FontWeight.bold)),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: TextField(
+              controller: controller,
+              minLines: 1,
+              maxLines: 4,
+              keyboardType: TextInputType.multiline,
+              decoration: InputDecoration(
+                labelText: state.t('new_name'),
+                border: const OutlineInputBorder(),
+              ),
+              autofocus: true,
+            ),
           ),
-          autofocus: true,
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(state.t('cancel'))),
-          FilledButton(
-            onPressed: () {
-              final newName = controller.text.trim();
-              if (newName.isNotEmpty && newName != project.name) {
-                state.renameProject(project.id, newName);
-              }
-              Navigator.pop(ctx);
-            },
-            child: Text(state.t('save')),
-          ),
-        ],
-      ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: Text(state.t('cancel'))),
+            FilledButton(
+              onPressed: () {
+                final newName = controller.text.trim();
+                if (newName.isNotEmpty && newName != project.name) {
+                  state.renameProject(project.id, newName);
+                }
+                Navigator.pop(ctx);
+              },
+              child: Text(state.t('save')),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -1066,35 +1097,44 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = Provider.of<AppState>(context);
+    final isDesktop = MediaQuery.of(context).size.width > 600;
+    final horizontalPadding = isDesktop ? 16.0 : 8.0;
+    final iconSize = isDesktop ? 28.0 : 24.0;
+    final topActionFontSize = isDesktop ? 18.0 : 16.0;
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(state.t('title'), style: const TextStyle(fontWeight: FontWeight.bold)),
+        title: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(state.t('title'), style: const TextStyle(fontWeight: FontWeight.bold)),
+        ),
         centerTitle: true,
         elevation: 2,
         actions: [
           IconButton(
+            iconSize: iconSize,
             icon: Icon(state.isDarkMode ? Icons.wb_sunny : Icons.nightlight_round),
             onPressed: state.toggleTheme,
           ),
           TextButton(
             onPressed: state.toggleLanguage,
-            child: Text(state.currentLang.toUpperCase(), style: TextStyle(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.bold, fontSize: 16)),
+            child: Text(state.currentLang.toUpperCase(), style: TextStyle(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.bold, fontSize: topActionFontSize)),
           ),
-          const SizedBox(width: 8),
+          SizedBox(width: horizontalPadding),
         ],
       ),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 600),
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: FilledButton.icon(
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 600),
+            child: Column(
+              children: [
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: horizontalPadding, vertical: 12.0),
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: isDesktop ? 56 : 48,
+                    child: FilledButton.icon(
                     onPressed: () => _showCreateProjectDialog(context, state),
                     icon: const Icon(Icons.add, size: 28),
                     label: Text(state.t('new_project'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
@@ -1116,7 +1156,7 @@ class HomeScreen extends StatelessWidget {
                             ),
                           )
                         : ListView.builder(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            padding: EdgeInsets.symmetric(horizontal: horizontalPadding, vertical: 8),
                             itemCount: state.projects.length,
                             itemBuilder: (context, index) => _buildProjectCard(context, state.projects[index], state),
                           ),
@@ -1124,6 +1164,7 @@ class HomeScreen extends StatelessWidget {
             ],
           ),
         ),
+      ),
       ),
     );
   }
@@ -2482,24 +2523,98 @@ class _EditorScreenState extends State<EditorScreen> {
     );
   }
 
+  void _showRenameDialog(BuildContext context, AppState state) {
+    final TextEditingController controller = TextEditingController(text: widget.project.name);
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        final isDesktop = MediaQuery.of(ctx).size.width > 600;
+        return AlertDialog(
+          insetPadding: EdgeInsets.symmetric(horizontal: isDesktop ? 24.0 : 12.0, vertical: 24.0),
+          titlePadding: EdgeInsets.only(left: isDesktop ? 24.0 : 16.0, right: isDesktop ? 24.0 : 16.0, top: 16.0, bottom: 8.0),
+          contentPadding: EdgeInsets.only(left: isDesktop ? 24.0 : 16.0, right: isDesktop ? 24.0 : 16.0, top: 8.0, bottom: 0.0),
+          actionsPadding: EdgeInsets.only(bottom: 12.0, right: isDesktop ? 24.0 : 12.0, top: 12.0),
+          title: Text(state.t('rename_project'), style: const TextStyle(fontWeight: FontWeight.bold)),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: TextField(
+              controller: controller,
+              minLines: 1,
+              maxLines: 4,
+              keyboardType: TextInputType.multiline,
+              decoration: InputDecoration(
+                labelText: state.t('new_name'),
+                border: const OutlineInputBorder(),
+              ),
+              autofocus: true,
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: Text(state.t('cancel'))),
+            FilledButton(
+              onPressed: () {
+                final newName = controller.text.trim();
+                if (newName.isNotEmpty && newName != widget.project.name) {
+                  state.renameProject(widget.project.id, newName);
+                  setState(() {}); // Ανανέωση UI για να φανεί ο νέος τίτλος
+                }
+                Navigator.pop(ctx);
+              },
+              child: Text(state.t('save')),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = Provider.of<AppState>(context);
+    final isDesktop = MediaQuery.of(context).size.width > 600;
+    final iconSize = isDesktop ? 28.0 : 24.0;
+    final topActionFontSize = isDesktop ? 18.0 : 15.0;
+    final horizontalPadding = isDesktop ? 16.0 : 8.0;
     
     return Scaffold(
       appBar: AppBar(
-        title: Text('${state.t('editor_title')}: ${widget.project.name}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+        titleSpacing: 0,
+        title: Tooltip(
+          message: widget.project.name,
+          child: InkWell(
+            onLongPress: () => _showRenameDialog(context, state),
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 4.0),
+              child: Text(
+                widget.project.name,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, height: 1.2),
+              ),
+            ),
+          ),
+        ),
         elevation: 2,
         actions: [
           IconButton(
+            iconSize: iconSize,
+            padding: const EdgeInsets.symmetric(horizontal: 4.0),
+            constraints: const BoxConstraints(),
             icon: Icon(state.isDarkMode ? Icons.wb_sunny : Icons.nightlight_round),
             onPressed: state.toggleTheme,
           ),
+          const SizedBox(width: 4),
           TextButton(
             onPressed: state.toggleLanguage,
-            child: Text(state.currentLang.toUpperCase(), style: TextStyle(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.bold, fontSize: 16)),
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8.0),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: Text(state.currentLang.toUpperCase(), style: TextStyle(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.bold, fontSize: topActionFontSize)),
           ),
-          const SizedBox(width: 8),
+          SizedBox(width: horizontalPadding),
         ],
       ),
       body: Focus(
