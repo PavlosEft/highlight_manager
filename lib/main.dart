@@ -5,12 +5,15 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:file_selector/file_selector.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_kit_config.dart';
 import 'package:ffmpeg_kit_flutter_new_min/return_code.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:window_manager/window_manager.dart';
@@ -18,6 +21,38 @@ import 'package:window_manager/window_manager.dart';
 // ==========================================
 // 1. DATA MODELS (Τα δεδομένα μας)
 // ==========================================
+
+Map<String, dynamic> _analyzeAudioInIsolate(Map<String, dynamic> args) {
+  final String audioPath = args['audioPath'];
+  final File audioFile = File(audioPath);
+  final Uint8List bytes = audioFile.readAsBytesSync();
+  
+  final int numSamples = (bytes.length - 44) ~/ 2;
+  final Int16List audioSamples = bytes.buffer.asInt16List(bytes.offsetInBytes + 44, numSamples);
+  
+  final int frameLength = 2048;
+  final int hopLength = 5512; 
+  final double sr = 8000.0; 
+  
+  List<double> rms = [];
+  List<double> times = [];
+  
+  for (int k = 0; k <= numSamples - frameLength; k += hopLength) {
+    double sumSq = 0.0;
+    for (int j = 0; j < frameLength; j++) {
+      double sample = audioSamples[k + j] / 32768.0;
+      sumSq += sample * sample;
+    }
+    rms.add(math.sqrt(sumSq / frameLength));
+    times.add(k / sr);
+  }
+  
+  return {
+    'rms': rms,
+    'times': times,
+    'duration': numSamples / sr,
+  };
+}
 
 class HighlightPhase {
   double timestamp;
@@ -151,6 +186,7 @@ const Map<String, Map<String, String>> translations = {
     'err_save': 'Σφάλμα αποθήκευσης project:',
     'err_delete': 'Σφάλμα διαγραφής project:',
     'add_videos': 'Προσθήκη Βίντεο',
+    'loading_files': 'Φόρτωση...',
     'clear_all': 'Καθαρισμός',
     'create_btn': 'ΔΗΜΙΟΥΡΓΙΑ',
     'duplicate_title': 'Υπάρχον Project',
@@ -182,6 +218,7 @@ const Map<String, Map<String, String>> translations = {
     'err_save': 'Error saving project:',
     'err_delete': 'Error deleting project:',
     'add_videos': 'Add Videos',
+    'loading_files': 'Loading...',
     'clear_all': 'Clear All',
     'create_btn': 'CREATE',
     'duplicate_title': 'Existing Project',
@@ -443,65 +480,81 @@ class AppState extends ChangeNotifier {
           final ffmpegExe = await _getDesktopFFmpegPath();
           _activeFfmpegProcess = await Process.start(
             ffmpegExe,
-            ['-y', '-i', path, '-vn', '-acodec', 'pcm_s16le', '-ar', '22050', '-ac', '1', audioPath],
+            ['-y', '-i', path, '-map', '0:a:0', '-vn', '-threads', '4', '-acodec', 'pcm_s16le', '-ar', '8000', '-ac', '1', audioPath],
           );
           
-          // ΑΠΑΡΑΙΤΗΤΟ: Το FFmpeg παράγει πολύ output (logs). Αν δεν το "αδειάσουμε" (drain), 
-          // ο buffer του OS γεμίζει και η διεργασία παγώνει για πάντα περιμένοντάς μας.
           _activeFfmpegProcess!.stdout.drain();
-          _activeFfmpegProcess!.stderr.drain();
+          _activeFfmpegProcess!.stderr.transform(utf8.decoder).listen((data) {
+            final timeMatch = RegExp(r'time=(\d{2}):(\d{2}):(\d{2}\.\d+)').firstMatch(data);
+            if (timeMatch != null) {
+              final h = int.parse(timeMatch.group(1)!);
+              final m = int.parse(timeMatch.group(2)!);
+              final s = double.parse(timeMatch.group(3)!);
+              final totalSec = h * 3600 + m * 60 + s;
+              if (dur > 0) {
+                int percent = (totalSec / dur * 100).toInt().clamp(0, 100);
+                onStatusUpdate("Εξαγωγή ήχου ${i + 1}/${paths.length} ($percent%)...");
+              }
+            }
+          });
 
           final exitCode = await _activeFfmpegProcess!.exitCode;
           if (exitCode != 0 || _isAnalysisCancelled) throw Exception('Cancelled or failed');
         } else {
-          final cmd = "-y -i \"$path\" -vn -acodec pcm_s16le -ar 22050 -ac 1 \"$audioPath\"";
-          final session = await FFmpegKit.execute(cmd);
-          final returnCode = await session.getReturnCode();
-          if (ReturnCode.isCancel(returnCode) || _isAnalysisCancelled) throw Exception('Cancelled');
+          String ffmpegPath = path;
+          // Μετατροπή των Content URIs του Android σε μορφή συμβατή με το FFmpeg
+          if (Platform.isAndroid && path.startsWith('content://')) {
+             try {
+               final saf = await FFmpegKitConfig.getSafParameterForRead(path);
+               if (saf != null) ffmpegPath = saf;
+             } catch (_) {}
+          }
+          final cmd = "-y -i \"$ffmpegPath\" -map 0:a:0 -vn -threads 4 -acodec pcm_s16le -ar 8000 -ac 1 \"$audioPath\"";
+          
+          final completer = Completer<void>();
+          await FFmpegKit.executeAsync(
+            cmd,
+            (session) async {
+              final returnCode = await session.getReturnCode();
+              if (ReturnCode.isCancel(returnCode) || _isAnalysisCancelled) {
+                completer.completeError(Exception('Cancelled'));
+              } else {
+                completer.complete();
+              }
+            },
+            (log) {},
+            (statistics) {
+              int timeInMs = statistics.getTime();
+              if (timeInMs > 0 && dur > 0) {
+                int percent = (timeInMs / (dur * 1000) * 100).toInt().clamp(0, 100);
+                onStatusUpdate("Εξαγωγή ήχου ${i + 1}/${paths.length} ($percent%)...");
+              }
+            }
+          );
+          await completer.future;
         }
 
         // --- ΠΡΑΓΜΑΤΙΚΗ ΑΝΑΛΥΣΗ RMS ---
-        onStatusUpdate("Ανάλυση ήχου ${i + 1}/${paths.length} (0%)...");
-        print('[FFMPEG] Εξαγωγή ολοκληρώθηκε. Ανάλυση RMS για το βίντεο ${i + 1}...');
+        onStatusUpdate("Ανάλυση ήχου ${i + 1}/${paths.length} (Επεξεργασία)...");
+        print('[FFMPEG] Εξαγωγή ολοκληρώθηκε. Ανάλυση RMS (Isolate) για το βίντεο ${i + 1}...');
         
-        final audioFile = File(audioPath);
-        final bytes = await audioFile.readAsBytes();
-        final byteData = bytes.buffer.asByteData(bytes.offsetInBytes, bytes.lengthInBytes);
+        // Μεταφορά των βαριών υπολογισμών σε ξεχωριστό Isolate (Νήμα)
+        final result = await compute(_analyzeAudioInIsolate, {
+          'audioPath': audioPath,
+        });
         
-        // 44 bytes header, 2 bytes per sample
-        final int numSamples = (bytes.length - 44) ~/ 2;
-        final int frameLength = 2048;
-        final int hopLength = 512;
-        final double sr = 22050.0;
+        final List<double> isolateRms = result['rms'];
+        final List<double> isolateTimes = result['times'];
+        final double isolateDur = result['duration'];
         
-        int totalFrames = numSamples ~/ hopLength;
-        int logStep = (totalFrames / 4).floor();
-        if (logStep == 0) logStep = 1;
-        int stepCount = 0;
-
-        for (int k = 0; k <= numSamples - frameLength; k += hopLength) {
-          if (_isAnalysisCancelled) throw Exception('Cancelled');
-          
-          double sumSq = 0.0;
-          for (int j = 0; j < frameLength; j++) {
-            int byteOffset = 44 + ((k + j) * 2);
-            double sample = byteData.getInt16(byteOffset, Endian.little) / 32768.0;
-            sumSq += sample * sample;
-          }
-          allRms.add(math.sqrt(sumSq / frameLength));
-          allTimes.add((k / sr) + cumulativeTime);
-          
-          stepCount++;
-          if (stepCount % logStep == 0 || stepCount == totalFrames) {
-            int percent = (stepCount / totalFrames * 100).toInt().clamp(0, 100);
-            print('[RMS Ανάλυση Βίντεο ${i+1}] $percent% ολοκληρώθηκε...');
-            onStatusUpdate("Ανάλυση ήχου ${i + 1}/${paths.length} ($percent%)...");
-            await Future.delayed(const Duration(milliseconds: 10)); // Επιτρέπει στο UI να ανανεωθεί
-          }
+        allRms.addAll(isolateRms);
+        for (double t in isolateTimes) {
+          allTimes.add(t + cumulativeTime);
         }
         
-        cumulativeTime += numSamples / sr;
+        cumulativeTime += isolateDur;
         
+        final audioFile = File(audioPath);
         if (await audioFile.exists()) {
           await audioFile.delete();
         }
@@ -558,35 +611,69 @@ class AppState extends ChangeNotifier {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  MediaKit.ensureInitialized();
   
-  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-    await windowManager.ensureInitialized();
-    final prefs = await SharedPreferences.getInstance();
-    final width = prefs.getDouble('win_w') ?? 1200.0;
-    final height = prefs.getDouble('win_h') ?? 800.0;
-    final posX = prefs.getDouble('win_x');
-    final posY = prefs.getDouble('win_y');
-
-    WindowOptions windowOptions = WindowOptions(
-      size: Size(width, height),
-      center: posX == null,
-      title: 'Highlight Manager',
+  // Ασπίδα προστασίας: Αν "σκάσει" κάτι, θα δείξει κόκκινη οθόνη με το σφάλμα αντί για μαύρη
+  ErrorWidget.builder = (FlutterErrorDetails details) {
+    return Material(
+      child: Container(
+        color: const Color(0xFF8B0000),
+        padding: const EdgeInsets.all(16),
+        child: SafeArea(
+          child: SingleChildScrollView(
+            child: Text(
+              details.exceptionAsString() + '\n\n' + (details.stack?.toString() ?? ''),
+              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ),
+      ),
     );
-    
-    windowManager.waitUntilReadyToShow(windowOptions, () async {
-      await windowManager.show();
-      await windowManager.focus();
-      if (posX != null && posY != null) {
-        await windowManager.setPosition(Offset(posX, posY));
-      }
-    });
+  };
+
+  try {
+    MediaKit.ensureInitialized();
+  } catch (e) {
+    debugPrint('MediaKit init error: $e');
   }
+  
+  try {
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      await windowManager.ensureInitialized();
+      final prefs = await SharedPreferences.getInstance();
+      final width = prefs.getDouble('win_w') ?? 1200.0;
+      final height = prefs.getDouble('win_h') ?? 800.0;
+      final posX = prefs.getDouble('win_x');
+      final posY = prefs.getDouble('win_y');
+
+      WindowOptions windowOptions = WindowOptions(
+        size: Size(width, height),
+        center: posX == null,
+        title: 'Highlight Manager',
+      );
+      
+      windowManager.waitUntilReadyToShow(windowOptions, () async {
+        await windowManager.show();
+        await windowManager.focus();
+        if (posX != null && posY != null) {
+          await windowManager.setPosition(Offset(posX, posY));
+        }
+      });
+    }
+  } catch (e) {
+    debugPrint('Window manager error: $e');
+  }
+
+  Widget app = const HighlightManagerApp();
+  try {
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      app = DesktopWindowWrapper(child: app);
+    }
+  } catch (_) {}
 
   runApp(
     ChangeNotifierProvider(
       create: (context) => AppState(),
-      child: const HighlightManagerApp(),
+      child: app,
     ),
   );
 }
@@ -598,7 +685,14 @@ class HighlightManagerApp extends StatefulWidget {
   State<HighlightManagerApp> createState() => _HighlightManagerAppState();
 }
 
-class _HighlightManagerAppState extends State<HighlightManagerApp> with WindowListener {
+class DesktopWindowWrapper extends StatefulWidget {
+  final Widget child;
+  const DesktopWindowWrapper({super.key, required this.child});
+  @override
+  State<DesktopWindowWrapper> createState() => _DesktopWindowWrapperState();
+}
+
+class _DesktopWindowWrapperState extends State<DesktopWindowWrapper> with WindowListener {
   Timer? _saveTimer;
 
   @override
@@ -617,7 +711,6 @@ class _HighlightManagerAppState extends State<HighlightManagerApp> with WindowLi
   void _saveWindowBounds() {
     _saveTimer?.cancel();
     _saveTimer = Timer(const Duration(milliseconds: 500), () async {
-      if (!Platform.isWindows && !Platform.isLinux && !Platform.isMacOS) return;
       final prefs = await SharedPreferences.getInstance();
       final size = await windowManager.getSize();
       final pos = await windowManager.getPosition();
@@ -631,12 +724,17 @@ class _HighlightManagerAppState extends State<HighlightManagerApp> with WindowLi
   @override
   void onWindowResized() {
     _saveWindowBounds();
-    setState(() {}); // Ενημέρωση του UI για το νέο text scaling κατά το resize
+    setState(() {}); 
   }
 
   @override
   void onWindowMoved() => _saveWindowBounds();
 
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
+class _HighlightManagerAppState extends State<HighlightManagerApp> {
   @override
   Widget build(BuildContext context) {
     final state = Provider.of<AppState>(context);
@@ -743,23 +841,61 @@ class NewProjectDialog extends StatefulWidget {
 class _NewProjectDialogState extends State<NewProjectDialog> {
   final TextEditingController _nameController = TextEditingController();
   final List<String> _selectedPaths = [];
+  final Map<String, String> _pathNames = {};
   bool _userEditedName = false;
+  bool _isPickingFiles = false;
+
+  static const platform = MethodChannel('com.example.highlight_manager/native_picker');
 
   void _pickFiles() async {
-    FilePickerResult? result = await FilePicker.platform.pickFiles(
-      type: FileType.video,
-      allowMultiple: true,
-    );
+    if (_isPickingFiles) return;
+    setState(() {
+      _isPickingFiles = true;
+    });
 
-    if (result != null && result.paths.isNotEmpty) {
-      setState(() {
-        for (String? path in result.paths) {
-          if (path != null && !_selectedPaths.contains(path)) {
-            _selectedPaths.add(path);
-          }
+    try {
+      if (Platform.isAndroid) {
+        final List<dynamic>? result = await platform.invokeListMethod('pickVideos');
+        if (result != null && result.isNotEmpty) {
+          setState(() {
+            for (var item in result) {
+              final map = Map<String, String>.from(item);
+              final path = map['path']!;
+              final name = map['name']!;
+              if (!_selectedPaths.contains(path)) {
+                _selectedPaths.add(path);
+                _pathNames[path] = name;
+              }
+            }
+            _updateAutoName();
+          });
         }
-        _updateAutoName();
-      });
+      } else {
+        FilePickerResult? result = await FilePicker.platform.pickFiles(
+          type: FileType.video,
+          allowMultiple: true,
+        );
+        if (result != null && result.files.isNotEmpty) {
+          setState(() {
+            for (var file in result.files) {
+              String? path = file.path;
+              if (path != null && !_selectedPaths.contains(path)) {
+                _selectedPaths.add(path);
+                _pathNames[path] = file.name;
+              }
+            }
+            _updateAutoName();
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Error picking files: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isPickingFiles = false;
+        });
+      }
     }
   }
 
@@ -767,7 +903,7 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
     if (_userEditedName || _selectedPaths.isEmpty) return;
     
     List<String> baseNames = _selectedPaths.map((path) {
-      String fileName = path.split(RegExp(r'[\\/]')).last;
+      String fileName = _pathNames[path] ?? path.split(RegExp(r'[\\/]')).last;
       return fileName.replaceAll(RegExp(r'\.[^.]*$'), ''); // Αφαίρεση κατάληξης (π.χ. .mp4)
     }).toList();
 
@@ -846,9 +982,11 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
               children: [
                 Expanded(
                   child: FilledButton.icon(
-                    onPressed: _pickFiles,
-                    icon: const Icon(Icons.folder_open),
-                    label: Text(t('add_videos')),
+                    onPressed: _isPickingFiles ? null : _pickFiles,
+                    icon: _isPickingFiles 
+                        ? Container(width: 20, height: 20, padding: const EdgeInsets.all(2.0), child: const CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.folder_open),
+                    label: Text(t(_isPickingFiles ? 'loading_files' : 'add_videos')),
                   ),
                 ),
                 if (_selectedPaths.isNotEmpty) ...[
@@ -890,7 +1028,7 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
                   },
                   itemBuilder: (context, index) {
                     final path = _selectedPaths[index];
-                    final fileName = path.split(RegExp(r'[\\/]')).last;
+                    final fileName = _pathNames[path] ?? path.split(RegExp(r'[\\/]')).last;
                     return ReorderableDelayedDragStartListener(
                       key: ValueKey(path),
                       index: index,
@@ -1255,9 +1393,16 @@ class _ExportSettingsDialogState extends State<ExportSettingsDialog> {
                   IconButton(
                     icon: const Icon(Icons.folder_open),
                     onPressed: () async {
-                      final res = await FilePicker.platform.pickFiles(type: FileType.media);
-                      if (res != null && res.files.single.path != null) {
-                        setState(() => transPath = res.files.single.path!);
+                      final res = await FilePicker.platform.pickFiles(
+                        type: FileType.media,
+                        withReadStream: Platform.isAndroid,
+                      );
+                      if (res != null && res.files.isNotEmpty) {
+                        String? path = Platform.isAndroid ? res.files.single.identifier : res.files.single.path;
+                        path ??= res.files.single.path;
+                        if (path != null) {
+                          setState(() => transPath = path!);
+                        }
                       }
                     },
                   ),
@@ -1391,7 +1536,20 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
       _activeProcess!.stderr.drain();
       return await _activeProcess!.exitCode;
     } else {
-      final session = await FFmpegKit.executeWithArguments(args);
+      List<String> safeArgs = [];
+      for (String arg in args) {
+        if (Platform.isAndroid && arg.startsWith('content://')) {
+          try {
+            final saf = await FFmpegKitConfig.getSafParameterForRead(arg);
+            safeArgs.add(saf ?? arg);
+          } catch (_) {
+            safeArgs.add(arg);
+          }
+        } else {
+          safeArgs.add(arg);
+        }
+      }
+      final session = await FFmpegKit.executeWithArguments(safeArgs);
       final returnCode = await session.getReturnCode();
       return returnCode?.isValueSuccess() == true ? 0 : 1;
     }
@@ -1847,10 +2005,8 @@ class _EditorScreenState extends State<EditorScreen> {
       final int index = phases.indexOf(currentPlayingPhase!);
       if (index < 0) return;
       
-      // Το πραγματικό ύψος κάθε στοιχείου στα Windows είναι ακριβώς ~56px.
-      // Το προηγούμενο 64άρι δημιουργούσε αθροιστικό λάθος σε μεγάλα index,
-      // με αποτέλεσμα το scroll να πηγαίνει πιο κάτω και να κρύβει το στοιχείο προς τα πάνω!
-      const double itemHeight = 56.0; 
+      // Το πραγματικό ύψος κάθε στοιχείου μετά τη συμπίεση
+      const double itemHeight = 52.0; 
       final double viewportHeight = _listScrollController.position.viewportDimension;
       
       // Στοχεύουμε στο κέντρο της οθόνης
@@ -2134,6 +2290,16 @@ class _EditorScreenState extends State<EditorScreen> {
     _seekTimer?.cancel();
   }
 
+  bool _showStarFeedback = false;
+
+  void _triggerStarFeedback() {
+    _addManualHighlight();
+    setState(() => _showStarFeedback = true);
+    Future.delayed(const Duration(milliseconds: 600), () {
+      if (mounted) setState(() => _showStarFeedback = false);
+    });
+  }
+
   Widget _buildMobileVideoPlayer(BuildContext context) {
     final posDuration = Duration(milliseconds: (globalPositionSeconds * 1000).toInt());
     final totalDur = Duration(milliseconds: (widget.project.totalDuration * 1000).toInt());
@@ -2156,7 +2322,7 @@ class _EditorScreenState extends State<EditorScreen> {
           },
           onPanEnd: (details) {
             if (details.velocity.pixelsPerSecond.dx > 300) {
-              _addManualHighlight();
+              _triggerStarFeedback();
             }
           },
           onLongPressStart: (details) {
@@ -2172,110 +2338,301 @@ class _EditorScreenState extends State<EditorScreen> {
           child: Container(
             color: Colors.black,
             width: double.infinity,
-            child: AspectRatio(
-              aspectRatio: 16 / 9,
-              child: Video(
-                controller: controller,
-                controls: NoVideoControls,
-              ),
-            ),
-          ),
-        ),
-        Transform.translate(
-          offset: const Offset(0, -4),
-          child: SizedBox(
-            height: 20,
-            child: SliderTheme(
-              data: SliderTheme.of(context).copyWith(
-                trackHeight: 4.0,
-                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6.0),
-                overlayShape: const RoundSliderOverlayShape(overlayRadius: 14.0),
-              ),
-              child: Slider(
-                value: globalPositionSeconds.clamp(0.0, widget.project.totalDuration > 0 ? widget.project.totalDuration : 1.0),
-                max: widget.project.totalDuration > 0 ? widget.project.totalDuration : 1.0,
-                onChangeStart: (v) {
-                  setState(() {
-                    isTrackingPhase = false;
-                    isAutoplaySuspended = true;
-                  });
-                },
-                onChanged: (v) {
-                  setState(() {
-                    globalPositionSeconds = v;
-                    isTrackingPhase = false;
-                    isAutoplaySuspended = true;
-                  });
-                  double accumulated = 0.0;
-                  for (int i = 0; i < widget.project.videoDurations.length; i++) {
-                    double dur = widget.project.videoDurations[i];
-                    if (v <= accumulated + dur || i == widget.project.videoDurations.length - 1) {
-                      if (player.state.playlist.index == i) {
-                        double localSeconds = v - accumulated;
-                        player.seek(Duration(milliseconds: (math.max(0.0, localSeconds) * 1000).toInt()));
-                      }
-                      break;
-                    }
-                    accumulated += dur;
-                  }
-                },
-                onChangeEnd: (v) {
-                  setState(() {
-                    isTrackingPhase = false;
-                    isAutoplaySuspended = true;
-                  });
-                  _seekGlobal(v).then((_) => player.play());
-                },
-              ),
-            ),
-          ),
-        ),
-        Transform.translate(
-          offset: const Offset(0, -8),
-          child: Padding(
-            padding: const EdgeInsets.only(left: 12.0, right: 12.0, bottom: 4.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            child: Stack(
+              alignment: Alignment.center,
               children: [
-                IconButton(
-                  icon: const Icon(Icons.star_border, color: Colors.amber, size: 28),
-                  onPressed: _addManualHighlight,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
+                AspectRatio(
+                  aspectRatio: 16 / 9,
+                  child: Video(
+                    controller: controller,
+                    controls: NoVideoControls,
+                  ),
                 ),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: Icon(Icons.skip_previous, color: Theme.of(context).colorScheme.primary, size: 30),
-                      onPressed: () => _navigate(-1),
-                      padding: const EdgeInsets.only(right: 28.0),
-                      constraints: const BoxConstraints(),
+                Positioned(
+                  bottom: 8,
+                  right: 8,
+                  child: Text(
+                    '${_formatDuration(posDuration)} / ${_formatDuration(totalDur)}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                      shadows: [
+                        Shadow(offset: Offset(1, 1), blurRadius: 2, color: Colors.black),
+                        Shadow(offset: Offset(-1, -1), blurRadius: 2, color: Colors.black),
+                      ],
                     ),
-                    IconButton(
-                      icon: Icon(isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill, color: Theme.of(context).colorScheme.primary, size: 44),
-                      onPressed: () => player.playOrPause(),
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                    ),
-                    IconButton(
-                      icon: Icon(Icons.skip_next, color: Theme.of(context).colorScheme.primary, size: 30),
-                      onPressed: () => _navigate(1),
-                      padding: const EdgeInsets.only(left: 28.0),
-                      constraints: const BoxConstraints(),
-                    ),
-                  ],
+                  ),
                 ),
-                Text(
-                  '${_formatDuration(posDuration)}\n${_formatDuration(totalDur)}',
-                  textAlign: TextAlign.right,
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, height: 1.2),
-                ),
+                if (_showStarFeedback)
+                  TweenAnimationBuilder<double>(
+                    tween: Tween<double>(begin: 0.5, end: 1.5),
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.elasticOut,
+                    builder: (context, scale, child) {
+                      return Transform.scale(
+                        scale: scale,
+                        child: Opacity(
+                          opacity: 0.8,
+                          child: const Icon(Icons.star, color: Colors.amber, size: 100),
+                        ),
+                      );
+                    },
+                  ),
               ],
             ),
           ),
         ),
+        // Γραμμή 1: Slider
+        SizedBox(
+          height: 12,
+          child: SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 3.0,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6.0),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 12.0),
+              trackShape: const RectangularSliderTrackShape(), 
+            ),
+            child: Slider(
+              value: globalPositionSeconds.clamp(0.0, widget.project.totalDuration > 0 ? widget.project.totalDuration : 1.0),
+              max: widget.project.totalDuration > 0 ? widget.project.totalDuration : 1.0,
+              onChangeStart: (v) {
+                setState(() {
+                  isTrackingPhase = false;
+                  isAutoplaySuspended = true;
+                });
+              },
+              onChanged: (v) {
+                setState(() {
+                  globalPositionSeconds = v;
+                  isTrackingPhase = false;
+                  isAutoplaySuspended = true;
+                });
+                double accumulated = 0.0;
+                for (int i = 0; i < widget.project.videoDurations.length; i++) {
+                  double dur = widget.project.videoDurations[i];
+                  if (v <= accumulated + dur || i == widget.project.videoDurations.length - 1) {
+                    if (player.state.playlist.index == i) {
+                      double localSeconds = v - accumulated;
+                      player.seek(Duration(milliseconds: (math.max(0.0, localSeconds) * 1000).toInt()));
+                    }
+                    break;
+                  }
+                  accumulated += dur;
+                }
+              },
+              onChangeEnd: (v) {
+                setState(() {
+                  isTrackingPhase = false;
+                  isAutoplaySuspended = true;
+                });
+                _seekGlobal(v).then((_) => player.play());
+              },
+            ),
+          ),
+        ),
+        // Γραμμή 2: Κουμπιά (Συμπαγή & Οβάλ Play)
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 2.0),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.star_border, color: Colors.amber, size: 24),
+                onPressed: _triggerStarFeedback,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: Icon(Icons.skip_previous, color: Theme.of(context).colorScheme.primary, size: 28),
+                        onPressed: () => _navigate(-1),
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                        constraints: const BoxConstraints(),
+                      ),
+                      InkWell(
+                        onTap: () => player.playOrPause(),
+                        borderRadius: BorderRadius.circular(16),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.primaryContainer,
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Icon(isPlaying ? Icons.pause : Icons.play_arrow, color: Theme.of(context).colorScheme.onPrimaryContainer, size: 28),
+                        ),
+                      ),
+                      IconButton(
+                        icon: Icon(Icons.skip_next, color: Theme.of(context).colorScheme.primary, size: 28),
+                        onPressed: () => _navigate(1),
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                        constraints: const BoxConstraints(),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              IconButton(
+                icon: Icon(Icons.settings, color: Theme.of(context).colorScheme.onSurfaceVariant, size: 24),
+                onPressed: () => _showSettingsSheet(context, Provider.of<AppState>(context, listen: false)),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
+            ],
+          ),
+        ),
       ],
+    );
+  }
+
+  void _showSettingsSheet(BuildContext context, AppState state) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setModalState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 16.0, right: 16.0, top: 16.0,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 16.0
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Center(child: Text('Ρυθμίσεις', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
+                  const Divider(),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Ευαισθησία: ${sensitivity.toInt()}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                            Slider(
+                              value: sensitivity, max: 100,
+                              onChanged: (v) {
+                                setModalState(() => sensitivity = v);
+                                setState(() => sensitivity = v);
+                                widget.project.sensitivity = v;
+                              },
+                              onChangeEnd: (v) {
+                                _recalcPhases();
+                                state.saveProject(widget.project);
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Ομαδοποίηση: ${grouping.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                            Slider(
+                              value: grouping, max: 10,
+                              onChanged: (v) {
+                                setModalState(() => grouping = v);
+                                setState(() => grouping = v);
+                                widget.project.grouping = v;
+                              },
+                              onChangeEnd: (v) {
+                                _recalcPhases();
+                                state.saveProject(widget.project);
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Start Offset: ${startOffset.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                            Slider(
+                              value: startOffset, max: 10,
+                              onChanged: (v) {
+                                setModalState(() => startOffset = v);
+                                setState(() => startOffset = v);
+                                widget.project.startOffset = v;
+                              },
+                              onChangeEnd: (v) => state.saveProject(widget.project),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('End Offset: ${endOffset.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                            Slider(
+                              value: endOffset, max: 10,
+                              onChanged: (v) {
+                                setModalState(() => endOffset = v);
+                                setState(() => endOffset = v);
+                                widget.project.endOffset = v;
+                              },
+                              onChangeEnd: (v) => state.saveProject(widget.project),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      Row(
+                        children: [
+                          Checkbox(value: autoplay, onChanged: (v) {
+                            setModalState(() => autoplay = v ?? false);
+                            setState(() => autoplay = v ?? false);
+                            widget.project.autoplay = autoplay;
+                            state.saveProject(widget.project);
+                          }),
+                          const Text('Autoplay', style: TextStyle(fontSize: 12)),
+                        ],
+                      ),
+                      Row(
+                        children: [
+                          Checkbox(value: skipSeen, onChanged: (v) {
+                            setModalState(() => skipSeen = v ?? false);
+                            setState(() => skipSeen = v ?? false);
+                            widget.project.skipSeen = skipSeen;
+                            state.saveProject(widget.project);
+                          }),
+                          const Text('Skip Seen', style: TextStyle(fontSize: 12)),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Εντάξει'),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+        );
+      }
     );
   }
 
@@ -2285,186 +2642,73 @@ class _EditorScreenState extends State<EditorScreen> {
 
     return Column(
       children: [
-        // --- SETTINGS AREA ---
+        // --- SMART TOOLBAR ---
         Container(
-          padding: const EdgeInsets.all(8.0),
+          padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 2.0),
           decoration: BoxDecoration(
             color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
             border: Border(bottom: BorderSide(color: Theme.of(context).dividerColor)),
           ),
-          child: Column(
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Ευαισθησία: ${sensitivity.toInt()}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                        Slider(
-                          value: sensitivity, max: 100,
-                          onChanged: (v) {
-                            setState(() => sensitivity = v);
-                            widget.project.sensitivity = v;
-                          },
-                          onChangeEnd: (v) {
-                            _recalcPhases();
-                            Provider.of<AppState>(context, listen: false).saveProject(widget.project);
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Ομαδοποίηση: ${grouping.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                        Slider(
-                          value: grouping, max: 10,
-                          onChanged: (v) {
-                            setState(() => grouping = v);
-                            widget.project.grouping = v;
-                          },
-                          onChangeEnd: (v) {
-                            _recalcPhases();
-                            Provider.of<AppState>(context, listen: false).saveProject(widget.project);
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Start Offset: ${startOffset.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                        Slider(
-                          value: startOffset, max: 10,
-                          onChanged: (v) {
-                            setState(() => startOffset = v);
-                            widget.project.startOffset = v;
-                          },
-                          onChangeEnd: (v) => Provider.of<AppState>(context, listen: false).saveProject(widget.project),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('End Offset: ${endOffset.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                        Slider(
-                          value: endOffset, max: 10,
-                          onChanged: (v) {
-                            setState(() => endOffset = v);
-                            widget.project.endOffset = v;
-                          },
-                          onChangeEnd: (v) => Provider.of<AppState>(context, listen: false).saveProject(widget.project),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  Row(
-                    children: [
-                      Checkbox(value: autoplay, onChanged: (v) {
-                        setState(() => autoplay = v ?? false);
-                        widget.project.autoplay = autoplay;
-                        Provider.of<AppState>(context, listen: false).saveProject(widget.project);
-                      }),
-                      const Text('Autoplay', style: TextStyle(fontSize: 12)),
-                    ],
-                  ),
-                  Row(
-                    children: [
-                      Checkbox(value: skipSeen, onChanged: (v) {
-                        setState(() => skipSeen = v ?? false);
-                        widget.project.skipSeen = skipSeen;
-                        Provider.of<AppState>(context, listen: false).saveProject(widget.project);
-                      }),
-                      const Text('Skip Seen', style: TextStyle(fontSize: 12)),
-                    ],
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-
-        // --- FILTERS & MANUAL ADD ---
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
           child: Row(
             children: [
-              Expanded(
-                child: OutlinedButton(
-                  style: OutlinedButton.styleFrom(
-                    backgroundColor: showHighlightsOnly ? Theme.of(context).colorScheme.primaryContainer : null,
-                    padding: const EdgeInsets.symmetric(vertical: 8),
+              if (showHighlightsOnly) ...[
+                SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: Checkbox(
+                    value: _areAllHighlightsSelected(),
+                    onChanged: widget.project.phases.where((p) => p.isHighlight).isEmpty ? null : _toggleAllHighlights,
                   ),
-                  onPressed: () {
-                    setState(() => showHighlightsOnly = !showHighlightsOnly);
-                    widget.project.showHighlightsOnly = showHighlightsOnly;
-                    Provider.of<AppState>(context, listen: false).saveProject(widget.project);
-                  },
-                  child: Text('Highlights', style: TextStyle(fontSize: 11, fontWeight: showHighlightsOnly ? FontWeight.bold : FontWeight.normal)),
+                ),
+                const SizedBox(width: 8),
+              ],
+              InkWell(
+                onTap: () {
+                  setState(() => showHighlightsOnly = !showHighlightsOnly);
+                  widget.project.showHighlightsOnly = showHighlightsOnly;
+                  state.saveProject(widget.project);
+                },
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: showHighlightsOnly ? Theme.of(context).colorScheme.primaryContainer : Colors.transparent,
+                    border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.star, size: 16, color: showHighlightsOnly ? Theme.of(context).colorScheme.primary : Colors.grey),
+                      const SizedBox(width: 2),
+                      const Icon(Icons.arrow_forward_ios, size: 12, color: Colors.grey),
+                      const SizedBox(width: 2),
+                      Icon(Icons.movie_creation_outlined, size: 16, color: showHighlightsOnly ? Theme.of(context).colorScheme.primary : Colors.grey),
+                    ],
+                  ),
                 ),
               ),
-              const SizedBox(width: 4),
-              Expanded(
-                child: FilledButton(
-                  style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 8)),
-                  onPressed: _addManualHighlight,
-                  child: const Text('Add Manual', style: TextStyle(fontSize: 11)),
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8.0),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
+              const Spacer(),
               if (showHighlightsOnly)
-                Row(
-                  children: [
-                    Checkbox(
-                      value: _areAllHighlightsSelected(),
-                      onChanged: _toggleAllHighlights,
-                    ),
-                    const Text('Επιλογή Όλων', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                  ],
-                )
-              else
-                const SizedBox.shrink(),
-              if (showHighlightsOnly)
-                TextButton.icon(
+                IconButton(
+                  icon: const Icon(Icons.sort, size: 20),
                   onPressed: () {
                     setState(() {
                       widget.project.phases.sort((a, b) => a.timestamp.compareTo(b.timestamp));
                     });
-                    Provider.of<AppState>(context, listen: false).saveProject(widget.project);
+                    state.saveProject(widget.project);
                   },
-                  icon: const Icon(Icons.sort, size: 16),
-                  label: const Text('Επαναφορά Σειράς', style: TextStyle(fontSize: 12)),
+                  tooltip: 'Επαναφορά Σειράς',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
                 )
               else
-                TextButton.icon(
+                IconButton(
+                  icon: const Icon(Icons.cleaning_services, size: 20),
                   onPressed: _resetSeen,
-                  icon: const Icon(Icons.cleaning_services, size: 16),
-                  label: const Text('Reset Seen', style: TextStyle(fontSize: 12)),
+                  tooltip: 'Reset Seen',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
                 ),
             ],
           ),
@@ -2526,49 +2770,59 @@ class _EditorScreenState extends State<EditorScreen> {
                     
                     Widget card = Card(
                       key: ObjectKey(phase),
-                      elevation: isDark ? 2 : 1,
+                      elevation: 1,
                       color: bgColor,
-                      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(4),
                         side: BorderSide(color: borderColor, width: isActive ? 2 : 1),
                       ),
                       child: ListTile(
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+                        dense: true,
+                        visualDensity: const VisualDensity(horizontal: 0, vertical: -2),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                        minVerticalPadding: 0,
                         leading: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             if (showHighlightsOnly)
                               ReorderableDragStartListener(
                                 index: index,
-                                child: const Padding(
-                                  padding: EdgeInsets.only(right: 4.0),
-                                  child: Icon(Icons.drag_indicator, color: Colors.grey),
-                                ),
+                                child: const Icon(Icons.drag_indicator, color: Colors.grey, size: 20),
                               ),
                             if (showHighlightsOnly && phase.isHighlight)
-                              Checkbox(
-                                value: phase.isSelected,
-                                onChanged: (v) {
-                                  setState(() => phase.isSelected = v ?? true);
+                              SizedBox(
+                                width: 28,
+                                child: Checkbox(
+                                  visualDensity: VisualDensity.compact,
+                                  value: phase.isSelected,
+                                  onChanged: (v) {
+                                    setState(() => phase.isSelected = v ?? true);
+                                    state.saveProject(widget.project);
+                                  },
+                                ),
+                              ),
+                            SizedBox(
+                              width: 32,
+                              child: IconButton(
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                icon: Icon(
+                                  phase.isHighlight ? Icons.star : Icons.star_border,
+                                  color: phase.isHighlight ? Colors.amber : Colors.grey,
+                                  size: 22,
+                                ),
+                                onPressed: () {
+                                  setState(() {
+                                    phase.isHighlight = !phase.isHighlight;
+                                    if (!phase.isHighlight) {
+                                      phase.customStartOffset = null;
+                                      phase.customEndOffset = null;
+                                    }
+                                  });
                                   state.saveProject(widget.project);
                                 },
                               ),
-                            IconButton(
-                              icon: Icon(
-                                phase.isHighlight ? Icons.star : Icons.star_border,
-                                color: phase.isHighlight ? Colors.amber : Colors.grey,
-                              ),
-                              onPressed: () {
-                                setState(() {
-                                  phase.isHighlight = !phase.isHighlight;
-                                  if (!phase.isHighlight) {
-                                    phase.customStartOffset = null;
-                                    phase.customEndOffset = null;
-                                  }
-                                });
-                                state.saveProject(widget.project);
-                              },
                             ),
                           ],
                         ),
@@ -2594,6 +2848,7 @@ class _EditorScreenState extends State<EditorScreen> {
                                 Text(
                                   '(${chronologicalPhases.indexOf(phase) + 1}) $m:$s', 
                                   style: TextStyle(
+                                    fontSize: 12,
                                     fontWeight: (isActive || isLastPlayed) ? FontWeight.bold : FontWeight.normal, 
                                     decoration: phase.isSeen && !isActive && !isLastPlayed ? TextDecoration.lineThrough : null,
                                     color: (isActive || isLastPlayed) 
@@ -2631,6 +2886,7 @@ class _EditorScreenState extends State<EditorScreen> {
                             '(${chronologicalPhases.indexOf(phase) + 1}) $m:$s', 
                             textAlign: TextAlign.center,
                             style: TextStyle(
+                              fontSize: 12,
                               fontWeight: (isActive || isLastPlayed) ? FontWeight.bold : FontWeight.normal, 
                               decoration: phase.isSeen && !isActive && !isLastPlayed ? TextDecoration.lineThrough : null,
                               color: (isActive || isLastPlayed) 
@@ -2638,31 +2894,6 @@ class _EditorScreenState extends State<EditorScreen> {
                                   : (phase.isSeen ? Colors.grey : null)
                             )
                           ),
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              icon: Icon(phase.isSeen ? Icons.visibility_off : Icons.visibility, size: 20),
-                              onPressed: () {
-                                setState(() => phase.isSeen = !phase.isSeen);
-                                state.saveProject(widget.project);
-                              },
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
-                              onPressed: () {
-                                setState(() {
-                                  widget.project.phases.remove(phase);
-                                  if (currentPlayingPhase == phase) {
-                                    activePhaseIndex = -1;
-                                    currentPlayingPhase = null;
-                                  }
-                                });
-                                state.saveProject(widget.project);
-                              },
-                            ),
-                          ],
                         ),
                         onTap: () => _playPhase(index, phases),
                       ),
