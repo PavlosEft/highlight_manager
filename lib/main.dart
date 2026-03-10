@@ -208,6 +208,7 @@ const Map<String, Map<String, String>> translations = {
 final lightTheme = ThemeData(
   colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple, brightness: Brightness.light),
   useMaterial3: true,
+  typography: Typography.material2021(),
   cardTheme: CardThemeData(
     elevation: 2,
     margin: const EdgeInsets.only(bottom: 12),
@@ -218,6 +219,7 @@ final lightTheme = ThemeData(
 final darkTheme = ThemeData(
   colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple, brightness: Brightness.dark),
   useMaterial3: true,
+  typography: Typography.material2021(),
   cardTheme: CardThemeData(
     elevation: 2,
     margin: const EdgeInsets.only(bottom: 12),
@@ -627,7 +629,10 @@ class _HighlightManagerAppState extends State<HighlightManagerApp> with WindowLi
   }
 
   @override
-  void onWindowResized() => _saveWindowBounds();
+  void onWindowResized() {
+    _saveWindowBounds();
+    setState(() {}); // Ενημέρωση του UI για το νέο text scaling κατά το resize
+  }
 
   @override
   void onWindowMoved() => _saveWindowBounds();
@@ -641,6 +646,22 @@ class _HighlightManagerAppState extends State<HighlightManagerApp> with WindowLi
       theme: lightTheme,
       darkTheme: darkTheme,
       themeMode: state.isDarkMode ? ThemeMode.dark : ThemeMode.light,
+      builder: (context, child) {
+        final size = MediaQuery.of(context).size;
+        final isDesktop = size.width > 600;
+        
+        // Δυναμικός υπολογισμός scale βάσει πλάτους
+        final double textScale = isDesktop 
+            ? (size.width / 1200).clamp(1.0, 1.25) 
+            : (size.width / 375).clamp(0.85, 1.15);
+
+        return MediaQuery(
+          data: MediaQuery.of(context).copyWith(
+            textScaler: TextScaler.linear(textScale),
+          ),
+          child: child!,
+        );
+      },
       home: const HomeScreen(),
     );
   }
@@ -682,7 +703,11 @@ class _ProcessingDialogState extends State<ProcessingDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Επεξεργασία', style: TextStyle(fontWeight: FontWeight.bold)),
+      title: const FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerLeft,
+        child: Text('Επεξεργασία', style: TextStyle(fontWeight: FontWeight.bold)),
+      ),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -793,7 +818,11 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
       insetPadding: EdgeInsets.symmetric(horizontal: isDesktop ? 24.0 : 4.0, vertical: isDesktop ? 24.0 : 4.0),
       contentPadding: EdgeInsets.only(left: isDesktop ? 24.0 : 8.0, right: isDesktop ? 24.0 : 8.0, top: 16.0, bottom: isDesktop ? 24.0 : 0.0),
       actionsPadding: EdgeInsets.only(bottom: isDesktop ? 16.0 : 4.0, right: isDesktop ? 24.0 : 8.0, top: 8.0),
-      title: Text(t('new_project'), style: const TextStyle(fontWeight: FontWeight.bold)),
+      title: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerLeft,
+        child: Text(t('new_project'), style: const TextStyle(fontWeight: FontWeight.bold)),
+      ),
       content: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: 600, maxHeight: MediaQuery.of(context).size.height * (isDesktop ? 0.9 : 0.98)),
         child: SizedBox(
@@ -941,7 +970,11 @@ class HomeScreen extends StatelessWidget {
           titlePadding: EdgeInsets.only(left: isDesktop ? 24.0 : 16.0, right: isDesktop ? 24.0 : 16.0, top: 16.0, bottom: 8.0),
           contentPadding: EdgeInsets.only(left: isDesktop ? 24.0 : 16.0, right: isDesktop ? 24.0 : 16.0, top: 8.0, bottom: 0.0),
           actionsPadding: EdgeInsets.only(bottom: 12.0, right: isDesktop ? 24.0 : 12.0, top: 12.0),
-          title: Text(state.t('rename_project'), style: const TextStyle(fontWeight: FontWeight.bold)),
+          title: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(state.t('rename_project'), style: const TextStyle(fontWeight: FontWeight.bold)),
+          ),
           content: SizedBox(
             width: double.maxFinite,
             child: TextField(
@@ -1097,7 +1130,9 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = Provider.of<AppState>(context);
-    final isDesktop = MediaQuery.of(context).size.width > 600;
+    final size = MediaQuery.of(context).size;
+    final isDesktop = size.width > 600;
+
     final horizontalPadding = isDesktop ? 16.0 : 8.0;
     final iconSize = isDesktop ? 28.0 : 24.0;
     final topActionFontSize = isDesktop ? 18.0 : 16.0;
@@ -1191,7 +1226,11 @@ class _ExportSettingsDialogState extends State<ExportSettingsDialog> {
   Widget build(BuildContext context) {
     final title = widget.mode == 'join' ? 'Εξαγωγή Video (Join)' : 'Εξαγωγή Clips';
     return AlertDialog(
-      title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+      title: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerLeft,
+        child: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+      ),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1488,7 +1527,11 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(isFinished ? 'Ολοκληρώθηκε' : 'Επεξεργασία...', style: const TextStyle(fontWeight: FontWeight.bold)),
+      title: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerLeft,
+        child: Text(isFinished ? 'Ολοκληρώθηκε' : 'Επεξεργασία...', style: const TextStyle(fontWeight: FontWeight.bold)),
+      ),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1861,6 +1904,7 @@ class _EditorScreenState extends State<EditorScreen> {
 
   @override
   void dispose() {
+    _seekTimer?.cancel();
     playingSub?.cancel();
     durationSub?.cancel();
     positionSub?.cancel();
@@ -2056,6 +2100,179 @@ class _EditorScreenState extends State<EditorScreen> {
                 }
               ),
             ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Timer? _seekTimer;
+
+  void _startSeeking(bool forward) {
+    _seekTimer?.cancel();
+    _seekTimer = Timer.periodic(const Duration(milliseconds: 200), (timer) {
+      final currentPos = globalPositionSeconds;
+      final newPos = forward ? currentPos + 2.0 : currentPos - 2.0;
+      final target = newPos.clamp(0.0, widget.project.totalDuration);
+      
+      double accumulated = 0.0;
+      for (int i = 0; i < widget.project.videoDurations.length; i++) {
+        double dur = widget.project.videoDurations[i];
+        if (target <= accumulated + dur || i == widget.project.videoDurations.length - 1) {
+          if (player.state.playlist.index == i) {
+            double localSeconds = target - accumulated;
+            player.seek(Duration(milliseconds: (math.max(0.0, localSeconds) * 1000).toInt()));
+          }
+          break;
+        }
+        accumulated += dur;
+      }
+    });
+  }
+
+  void _stopSeeking() {
+    _seekTimer?.cancel();
+  }
+
+  Widget _buildMobileVideoPlayer(BuildContext context) {
+    final posDuration = Duration(milliseconds: (globalPositionSeconds * 1000).toInt());
+    final totalDur = Duration(milliseconds: (widget.project.totalDuration * 1000).toInt());
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapUp: (details) {
+            final width = MediaQuery.of(context).size.width;
+            final x = details.localPosition.dx;
+            if (x < width * 0.3) {
+              _navigate(-1);
+            } else if (x > width * 0.7) {
+              _navigate(1);
+            } else {
+              player.playOrPause();
+            }
+          },
+          onPanEnd: (details) {
+            if (details.velocity.pixelsPerSecond.dx > 300) {
+              _addManualHighlight();
+            }
+          },
+          onLongPressStart: (details) {
+            final width = MediaQuery.of(context).size.width;
+            final x = details.localPosition.dx;
+            if (x < width * 0.3) {
+              _startSeeking(false);
+            } else if (x > width * 0.7) {
+              _startSeeking(true);
+            }
+          },
+          onLongPressEnd: (_) => _stopSeeking(),
+          child: Container(
+            color: Colors.black,
+            width: double.infinity,
+            child: AspectRatio(
+              aspectRatio: 16 / 9,
+              child: Video(
+                controller: controller,
+                controls: NoVideoControls,
+              ),
+            ),
+          ),
+        ),
+        Transform.translate(
+          offset: const Offset(0, -4),
+          child: SizedBox(
+            height: 20,
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 4.0,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6.0),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 14.0),
+              ),
+              child: Slider(
+                value: globalPositionSeconds.clamp(0.0, widget.project.totalDuration > 0 ? widget.project.totalDuration : 1.0),
+                max: widget.project.totalDuration > 0 ? widget.project.totalDuration : 1.0,
+                onChangeStart: (v) {
+                  setState(() {
+                    isTrackingPhase = false;
+                    isAutoplaySuspended = true;
+                  });
+                },
+                onChanged: (v) {
+                  setState(() {
+                    globalPositionSeconds = v;
+                    isTrackingPhase = false;
+                    isAutoplaySuspended = true;
+                  });
+                  double accumulated = 0.0;
+                  for (int i = 0; i < widget.project.videoDurations.length; i++) {
+                    double dur = widget.project.videoDurations[i];
+                    if (v <= accumulated + dur || i == widget.project.videoDurations.length - 1) {
+                      if (player.state.playlist.index == i) {
+                        double localSeconds = v - accumulated;
+                        player.seek(Duration(milliseconds: (math.max(0.0, localSeconds) * 1000).toInt()));
+                      }
+                      break;
+                    }
+                    accumulated += dur;
+                  }
+                },
+                onChangeEnd: (v) {
+                  setState(() {
+                    isTrackingPhase = false;
+                    isAutoplaySuspended = true;
+                  });
+                  _seekGlobal(v).then((_) => player.play());
+                },
+              ),
+            ),
+          ),
+        ),
+        Transform.translate(
+          offset: const Offset(0, -8),
+          child: Padding(
+            padding: const EdgeInsets.only(left: 12.0, right: 12.0, bottom: 4.0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.star_border, color: Colors.amber, size: 28),
+                  onPressed: _addManualHighlight,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: Icon(Icons.skip_previous, color: Theme.of(context).colorScheme.primary, size: 30),
+                      onPressed: () => _navigate(-1),
+                      padding: const EdgeInsets.only(right: 28.0),
+                      constraints: const BoxConstraints(),
+                    ),
+                    IconButton(
+                      icon: Icon(isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill, color: Theme.of(context).colorScheme.primary, size: 44),
+                      onPressed: () => player.playOrPause(),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.skip_next, color: Theme.of(context).colorScheme.primary, size: 30),
+                      onPressed: () => _navigate(1),
+                      padding: const EdgeInsets.only(left: 28.0),
+                      constraints: const BoxConstraints(),
+                    ),
+                  ],
+                ),
+                Text(
+                  '${_formatDuration(posDuration)}\n${_formatDuration(totalDur)}',
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, height: 1.2),
+                ),
+              ],
+            ),
           ),
         ),
       ],
@@ -2534,7 +2751,11 @@ class _EditorScreenState extends State<EditorScreen> {
           titlePadding: EdgeInsets.only(left: isDesktop ? 24.0 : 16.0, right: isDesktop ? 24.0 : 16.0, top: 16.0, bottom: 8.0),
           contentPadding: EdgeInsets.only(left: isDesktop ? 24.0 : 16.0, right: isDesktop ? 24.0 : 16.0, top: 8.0, bottom: 0.0),
           actionsPadding: EdgeInsets.only(bottom: 12.0, right: isDesktop ? 24.0 : 12.0, top: 12.0),
-          title: Text(state.t('rename_project'), style: const TextStyle(fontWeight: FontWeight.bold)),
+          title: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(state.t('rename_project'), style: const TextStyle(fontWeight: FontWeight.bold)),
+          ),
           content: SizedBox(
             width: double.maxFinite,
             child: TextField(
@@ -2590,7 +2811,7 @@ class _EditorScreenState extends State<EditorScreen> {
                 widget.project.name,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, height: 1.2),
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, height: 1.2),
               ),
             ),
           ),
@@ -2695,12 +2916,8 @@ class _EditorScreenState extends State<EditorScreen> {
             } else {
               return Column(
                 children: [
+                  _buildMobileVideoPlayer(context),
                   Expanded(
-                    flex: 4,
-                    child: _buildVideoPlayer(context),
-                  ),
-                  Expanded(
-                    flex: 5,
                     child: _buildSidePanel(context, state),
                   ),
                 ],

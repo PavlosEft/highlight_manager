@@ -1,5 +1,7 @@
 @echo off
 title Flutter Clean Dev Server
+echo Starting Device Mirror...
+start cmd /k "C:\Users\Lenovo\Desktop\device-mirror\run-mirror.bat"
 echo ====================================================
 echo Clean cache (flutter clean)...
 echo ====================================================
