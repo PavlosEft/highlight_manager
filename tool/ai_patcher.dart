@@ -18,12 +18,19 @@ void main() async {
       bool success = applyPatch(clipboard);
       
       if (success) {
-        // Η αλλαγή αρχείου θα "πυροδοτήσει" τον dev_server.dart (file watcher)
-        // ώστε να φτιάξει αυτόματα το Backup ZIP και να κάνει Hot Reload (r).
+        // Ανίχνευση Action tag που στέλνει το AI
+        final actionRegex = RegExp(r'<ACTION>(.*?)</ACTION>', dotAll: true);
+        final actionMatch = actionRegex.firstMatch(clipboard);
+        String action = 'RELOAD'; // Προεπιλογή αν δεν βρεθεί
+        if (actionMatch != null) {
+          action = actionMatch.group(1)!.trim().toUpperCase();
+        }
+
         try {
-          File('tool/.trigger_reload').writeAsStringSync(DateTime.now().toIso8601String());
+          // Γράφει το timestamp ΜΑΖΙ με το action (χωρισμένα με |)
+          File('tool/.trigger_reload').writeAsStringSync('${DateTime.now().toIso8601String()}|$action');
         } catch (_) {}
-        print('✅ Το patch εφαρμόστηκε. Ο Dev Server ενημερώνεται αυτόματα.');
+        print('✅ Το patch εφαρμόστηκε. Action: $action. Ο Dev Server ενημερώνεται αυτόματα.');
       } else {
         print('⚠️ Αποτυχία εφαρμογής. Ελέγξτε τα αρχεία.');
       }

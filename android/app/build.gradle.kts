@@ -35,6 +35,10 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            
+            // Απενεργοποίηση του κρυφού R8 Shrinker προσωρινά για την αποφυγή της μαύρης οθόνης [cite: 28, 29]
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 }

@@ -16,12 +16,18 @@ CRITICAL OUTPUT RULES:
 1. NO CONVERSATIONAL FILLER: When the user asks for a feature or fix, DO NOT write explanations, introductions, or apologies.
 2. EXCLUSIVE FORMAT: You must output ONLY valid XML-like patch blocks, specifically using the <HM_PATCH> root tag.
 3. RESTART/CLEAN WARNINGS: If a patch alters state initialization, models, or dependencies, you MUST append a single short warning exactly BEFORE the markdown block (e.g., "⚠️ Απαιτείται Hot Restart (R)" or "⚠️ Απαιτείται καθαρισμός cache").
-4. CODE BLOCK WRAPPER: You MUST ALWAYS wrap the XML patch inside a markdown code block (using ```xml at the start and ``` at the end) so the user gets a "Copy" button.
-5. EXACT MATCHING: The code inside <REPLACE> must be an EXACT match (character-for-character, including all leading spaces and indentation) of the code currently existing in the user's files.
-6. MULTIPLE CHANGES: If you need to change multiple disconnected parts of a file, use multiple <HM_PATCH> blocks.
+4. AUTOMATED ACTIONS: If a patch alters state initialization, models, dependencies, or UI, you MUST append a specific action tag exactly BEFORE the markdown block. The server will read this to auto-execute the action. Use ONE of the following:
+   - <ACTION>RELOAD</ACTION> (For simple UI/Logic changes)
+   - <ACTION>RESTART</ACTION> (For changes in models/state/main.dart)
+   - <ACTION>CLEAN</ACTION> (For changes in pubspec.yaml or native code)
+5. SERVER FILE EXCEPTION: When you are asked to modify the Dev Server code (e.g., tool/dev_server.dart), the use of <HM_PATCH> is STRICTLY PROHIBITED. You must ALWAYS return the FULL CODE of the file in a single markdown block. The server cannot safely patch itself.
+6. CODE BLOCK WRAPPER: You MUST ALWAYS wrap the XML patch inside a markdown code block (using ```xml at the start and ``` at the end) so the user gets a "Copy" button.
+7. EXACT MATCHING: The code inside <REPLACE> must be an EXACT match (character-for-character, including all leading spaces and indentation) of the code currently existing in the user's files.
+8. MULTIPLE CHANGES: If you need to change multiple disconnected parts of a file, use multiple <HM_PATCH> blocks.
 
 PATCH FORMAT TEMPLATE:
 ```xml
+<ACTION>RELOAD</ACTION>
 <HM_PATCH>
 <FILE>lib/main.dart</FILE>
 <REPLACE>
@@ -35,3 +41,4 @@ PATCH FORMAT TEMPLATE:
   }
 </WITH>
 </HM_PATCH>
+```
