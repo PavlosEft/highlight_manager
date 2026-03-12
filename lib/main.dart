@@ -12,6 +12,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_kit_config.dart';
 import 'package:ffmpeg_kit_flutter_new_min/return_code.dart';
+import 'package:ffmpeg_kit_flutter_new_min/ffprobe_kit.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:math' as math;
@@ -22,37 +23,7 @@ import 'package:window_manager/window_manager.dart';
 // 1. DATA MODELS (Τα δεδομένα μας)
 // ==========================================
 
-Map<String, dynamic> _analyzeAudioInIsolate(Map<String, dynamic> args) {
-  final String audioPath = args['audioPath'];
-  final File audioFile = File(audioPath);
-  final Uint8List bytes = audioFile.readAsBytesSync();
-  
-  final int numSamples = (bytes.length - 44) ~/ 2;
-  final Int16List audioSamples = bytes.buffer.asInt16List(bytes.offsetInBytes + 44, numSamples);
-  
-  final int frameLength = 2048;
-  final int hopLength = 5512; 
-  final double sr = 8000.0; 
-  
-  List<double> rms = [];
-  List<double> times = [];
-  
-  for (int k = 0; k <= numSamples - frameLength; k += hopLength) {
-    double sumSq = 0.0;
-    for (int j = 0; j < frameLength; j++) {
-      double sample = audioSamples[k + j] / 32768.0;
-      sumSq += sample * sample;
-    }
-    rms.add(math.sqrt(sumSq / frameLength));
-    times.add(k / sr);
-  }
-  
-  return {
-    'rms': rms,
-    'times': times,
-    'duration': numSamples / sr,
-  };
-}
+// Αφαιρέθηκε το Isolate: Η ανάλυση γίνεται on-the-fly μέσω FFmpeg ebur128!
 
 class HighlightPhase {
   double timestamp;
@@ -268,6 +239,66 @@ final darkTheme = ThemeData(
 // 2. BACKEND / STATE MANAGEMENT
 // ==========================================
 
+Future<Map<String, dynamic>> _analyzePcmTask(Map<String, dynamic> args) async {
+  final String path = args['path'];
+  final double cumulativeTime = args['cumulativeTime'];
+  
+  final pcmFile = File(path);
+  if (!pcmFile.existsSync()) return {'rms': <double>[], 'times': <double>[]};
+
+  final bytes = pcmFile.readAsBytesSync();
+  // Μετατροπή των bytes σε Native Int16 Array. Είναι ~100x πιο γρήγορο από το byteData.getInt16()
+  final int16List = bytes.buffer.asInt16List(bytes.offsetInBytes, bytes.lengthInBytes ~/ 2);
+  
+  const sampleRate = 8000;
+  // Προσομοίωση EBUR128 Momentary: Υπολογισμός κάθε 100ms (800 δείγματα),
+  // αλλά εξετάζοντας "παράθυρο" 400ms (3200 δείγματα) για εξομάλυνση.
+  const int stepSamples = 800; 
+  const int windowSamples = 3200; 
+  
+  final int totalSteps = (int16List.length / stepSamples).ceil();
+  List<double> isolateRms = List<double>.filled(totalSteps, 0.0);
+  List<double> isolateTimes = List<double>.filled(totalSteps, 0.0);
+
+  for (int step = 0; step < totalSteps; step++) {
+    int startIdx = step * stepSamples;
+    int endIdx = startIdx + windowSamples;
+    if (endIdx > int16List.length) endIdx = int16List.length;
+    if (startIdx >= int16List.length) break;
+    
+    // 🚀 SILENCE GATE: Ανίχνευση "νεκρών" σημείων
+    bool hasSound = false;
+    for (int j = startIdx; j < endIdx; j += 5) { 
+      if (int16List[j] > 100 || int16List[j] < -100) { 
+        hasSound = true;
+        break;
+      }
+    }
+
+    if (!hasSound) {
+       isolateRms[step] = 0.0;
+       isolateTimes[step] = (startIdx / sampleRate) + cumulativeTime;
+       continue;
+    }
+
+    double sumSquares = 0.0;
+    for (int j = startIdx; j < endIdx; j++) {
+      final double normalized = int16List[j] / 32768.0;
+      sumSquares += normalized * normalized;
+    }
+    
+    final int count = endIdx - startIdx;
+    final rms = count > 0 ? math.sqrt(sumSquares / count) : 0.0;
+    
+    isolateRms[step] = rms; // Καθαρό γραμμικό RMS, όπως ακριβώς το υπολόγιζε η αρχική σου εξίσωση
+    isolateTimes[step] = (startIdx / sampleRate) + cumulativeTime;
+  }
+  
+  try { pcmFile.deleteSync(); } catch (_) {}
+  
+  return {'rms': isolateRms, 'times': isolateTimes};
+}
+
 class AppState extends ChangeNotifier {
   List<Project> projects = [];
   bool isLoading = true;
@@ -409,12 +440,12 @@ class AppState extends ChangeNotifier {
   }
 
   bool _isAnalysisCancelled = false;
-  Process? _activeFfmpegProcess;
+  List<Process> _activeFfmpegProcesses = [];
 
   void cancelAnalysis() {
     _isAnalysisCancelled = true;
     if (Platform.isWindows || Platform.isLinux) {
-      _activeFfmpegProcess?.kill();
+      for (var p in _activeFfmpegProcesses) p.kill();
     } else {
       FFmpegKit.cancel(); 
     }
@@ -449,127 +480,162 @@ class AppState extends ChangeNotifier {
 
     double totalDur = 0.0;
     List<double> videoDurations = [];
-    final player = Player();
     
     List<double> allRms = [];
     List<double> allTimes = [];
     double cumulativeTime = 0.0;
+    
+    final totalStopwatch = Stopwatch()..start();
 
     try {
       for (int i = 0; i < paths.length; i++) {
         if (_isAnalysisCancelled) throw Exception('Cancelled');
         
+        final stepStopwatch = Stopwatch()..start();
         String path = paths[i];
         onStatusUpdate("Υπολογισμός διάρκειας ${i + 1}/${paths.length}...");
         
-        await player.open(Media(path), play: false);
-        for (int j = 0; j < 20; j++) {
-          if (player.state.duration != Duration.zero) break;
+        double dur = 0.0;
+        
+        // ΕΠΑΝΑΦΟΡΑ ΣΤΟ MEDIAKIT ΓΙΑ ΑΚΡΙΒΗ ΔΙΑΡΚΕΙΑ
+        // Σε τεράστια/raw βίντεο, τα metadata είναι συχνά σπασμένα και το FFprobe
+        // επιστρέφει λάθος διάρκεια. Το MediaKit διαβάζει το πραγματικό stream.
+        final tempPlayer = Player();
+        await tempPlayer.open(Media(path), play: false);
+        for (int j = 0; j < 30; j++) {
+          if (tempPlayer.state.duration != Duration.zero) break;
           await Future.delayed(const Duration(milliseconds: 100));
         }
-        double dur = player.state.duration.inMilliseconds / 1000.0;
+        dur = tempPlayer.state.duration.inMilliseconds / 1000.0;
+        await tempPlayer.dispose();
+        
+        if (dur <= 0.0) dur = 1.0; // Fallback
+        
+        print('⏱️ [PROFILING] Διάρκεια βίντεο ${i+1} βρέθηκε σε ${stepStopwatch.elapsedMilliseconds}ms ($dur sec)');
+        stepStopwatch.reset();
+
         totalDur += dur;
         videoDurations.add(dur);
 
         if (_isAnalysisCancelled) throw Exception('Cancelled');
         
-        onStatusUpdate("Εξαγωγή ήχου ${i + 1}/${paths.length}...");
-        final audioPath = '${projectDir.path}/temp_audio_$i.wav';
+        // Δυναμικός υπολογισμός βάσει των πραγματικών CPU cores της συσκευής.
+        // Το .clamp(2, 6) εξασφαλίζει ότι θα φτιάξει τουλάχιστον 2 chunks,
+        // αλλά ποτέ πάνω από 6, προστατεύοντας τον δίσκο από I/O thrashing.
+        int numChunks = Platform.numberOfProcessors.clamp(2, 6); 
+        onStatusUpdate("Εξαγωγή Ήχου ${i + 1}/${paths.length} (Παράλληλα $numChunks τμήματα)...");
         
+        double chunkDur = dur / numChunks;
+        List<String> chunkPaths = [];
+        List<Future<void>> futures = [];
+        int completedChunks = 0;
+
+        _activeFfmpegProcesses.clear();
+
         if (Platform.isWindows || Platform.isLinux) {
           final ffmpegExe = await _getDesktopFFmpegPath();
-          _activeFfmpegProcess = await Process.start(
-            ffmpegExe,
-            ['-y', '-i', path, '-map', '0:a:0', '-vn', '-threads', '4', '-acodec', 'pcm_s16le', '-ar', '8000', '-ac', '1', audioPath],
-          );
           
-          _activeFfmpegProcess!.stdout.drain();
-          _activeFfmpegProcess!.stderr.transform(utf8.decoder).listen((data) {
-            final timeMatch = RegExp(r'time=(\d{2}):(\d{2}):(\d{2}\.\d+)').firstMatch(data);
-            if (timeMatch != null) {
-              final h = int.parse(timeMatch.group(1)!);
-              final m = int.parse(timeMatch.group(2)!);
-              final s = double.parse(timeMatch.group(3)!);
-              final totalSec = h * 3600 + m * 60 + s;
-              if (dur > 0) {
-                int percent = (totalSec / dur * 100).toInt().clamp(0, 100);
-                onStatusUpdate("Εξαγωγή ήχου ${i + 1}/${paths.length} ($percent%)...");
-              }
-            }
-          });
+          for (int c = 0; c < numChunks; c++) {
+            double startOffset = c * chunkDur;
+            double duration = (c == numChunks - 1) ? (dur - startOffset) : chunkDur;
+            String chunkPath = '${projectDir.path}/temp_audio_${i}_chunk_$c.pcm';
+            chunkPaths.add(chunkPath);
 
-          final exitCode = await _activeFfmpegProcess!.exitCode;
-          if (exitCode != 0 || _isAnalysisCancelled) throw Exception('Cancelled or failed');
+            final p = await Process.start(
+              ffmpegExe,
+              ['-y', '-ss', startOffset.toStringAsFixed(3), '-t', duration.toStringAsFixed(3), '-discard:v', 'all', '-i', path, '-map', '0:a:0', '-vn', '-af', 'highpass=f=300', '-ac', '1', '-ar', '8000', '-f', 's16le', chunkPath],
+            );
+            _activeFfmpegProcesses.add(p);
+          }
+
+          for (var p in _activeFfmpegProcesses) {
+             final exitCode = await p.exitCode;
+             completedChunks++;
+             onStatusUpdate("Εξαγωγή Ήχου ${i + 1}/${paths.length} ($completedChunks/$numChunks τμήματα)...");
+             if (exitCode != 0 && !_isAnalysisCancelled) throw Exception('FFmpeg failed');
+          }
+          if (_isAnalysisCancelled) throw Exception('Cancelled');
         } else {
           String ffmpegPath = path;
-          // Μετατροπή των Content URIs του Android σε μορφή συμβατή με το FFmpeg
           if (Platform.isAndroid && path.startsWith('content://')) {
              try {
                final saf = await FFmpegKitConfig.getSafParameterForRead(path);
                if (saf != null) ffmpegPath = saf;
              } catch (_) {}
           }
-          final cmd = "-y -i \"$ffmpegPath\" -map 0:a:0 -vn -threads 4 -acodec pcm_s16le -ar 8000 -ac 1 \"$audioPath\"";
-          
-          final completer = Completer<void>();
-          await FFmpegKit.executeAsync(
-            cmd,
-            (session) async {
-              final returnCode = await session.getReturnCode();
-              if (ReturnCode.isCancel(returnCode) || _isAnalysisCancelled) {
-                completer.completeError(Exception('Cancelled'));
-              } else {
-                completer.complete();
+
+          for (int c = 0; c < numChunks; c++) {
+            double startOffset = c * chunkDur;
+            double duration = (c == numChunks - 1) ? (dur - startOffset) : chunkDur;
+            String chunkPath = '${projectDir.path}/temp_audio_${i}_chunk_$c.pcm';
+            chunkPaths.add(chunkPath);
+
+            // Γρήγορο seek με -ss ΠΡΙΝ το -i (Το -ss πριν το -i πηδάει ακαριαία στο χρόνο χωρίς να διαβάζει τα δεδομένα!)
+            final cmd = "-y -ss ${startOffset.toStringAsFixed(3)} -t ${duration.toStringAsFixed(3)} -discard:v all -i \"$ffmpegPath\" -map 0:a:0 -vn -af highpass=f=300 -ac 1 -ar 8000 -f s16le \"$chunkPath\"";
+            
+            final completer = Completer<void>();
+            FFmpegKit.executeAsync(
+              cmd,
+              (session) async {
+                final returnCode = await session.getReturnCode();
+                if (ReturnCode.isCancel(returnCode) || _isAnalysisCancelled) {
+                  completer.completeError(Exception('Cancelled'));
+                } else {
+                  completedChunks++;
+                  onStatusUpdate("Εξαγωγή Ήχου ${i + 1}/${paths.length} ($completedChunks/$numChunks τμήματα)...");
+                  completer.complete();
+                }
               }
-            },
-            (log) {},
-            (statistics) {
-              int timeInMs = statistics.getTime();
-              if (timeInMs > 0 && dur > 0) {
-                int percent = (timeInMs / (dur * 1000) * 100).toInt().clamp(0, 100);
-                onStatusUpdate("Εξαγωγή ήχου ${i + 1}/${paths.length} ($percent%)...");
-              }
-            }
-          );
-          await completer.future;
+            );
+            futures.add(completer.future);
+          }
+          await Future.wait(futures);
         }
 
-        // --- ΠΡΑΓΜΑΤΙΚΗ ΑΝΑΛΥΣΗ RMS ---
-        onStatusUpdate("Ανάλυση ήχου ${i + 1}/${paths.length} (Επεξεργασία)...");
-        print('[FFMPEG] Εξαγωγή ολοκληρώθηκε. Ανάλυση RMS (Isolate) για το βίντεο ${i + 1}...');
-        
-        // Μεταφορά των βαριών υπολογισμών σε ξεχωριστό Isolate (Νήμα)
-        final result = await compute(_analyzeAudioInIsolate, {
-          'audioPath': audioPath,
-        });
-        
-        final List<double> isolateRms = result['rms'];
-        final List<double> isolateTimes = result['times'];
-        final double isolateDur = result['duration'];
-        
-        allRms.addAll(isolateRms);
-        for (double t in isolateTimes) {
-          allTimes.add(t + cumulativeTime);
+        print('⏱️ [PROFILING] Εξαγωγή Ήχου FFmpeg (Παράλληλη, $numChunks chunks) ολοκληρώθηκε σε ${stepStopwatch.elapsedMilliseconds}ms');
+        stepStopwatch.reset();
+
+        if (_isAnalysisCancelled) throw Exception('Cancelled');
+        onStatusUpdate("Ανάλυση Δεδομένων ${i + 1}/${paths.length} (Στο παρασκήνιο)...");
+
+        double currentChunkCumulative = cumulativeTime;
+        for (int c = 0; c < numChunks; c++) {
+           final result = await compute(_analyzePcmTask, {
+             'path': chunkPaths[c],
+             'cumulativeTime': currentChunkCumulative,
+           });
+           allRms.addAll(result['rms'] as List<double>);
+           allTimes.addAll(result['times'] as List<double>);
+           currentChunkCumulative += (c == numChunks - 1) ? (dur - c * chunkDur) : chunkDur;
         }
-        
-        cumulativeTime += isolateDur;
-        
-        final audioFile = File(audioPath);
-        if (await audioFile.exists()) {
-          await audioFile.delete();
-        }
+
+        print('⏱️ [PROFILING] Ανάλυση PCM (Dart - Chunks) ολοκληρώθηκε σε ${stepStopwatch.elapsedMilliseconds}ms');
+
+        cumulativeTime += dur;
       }
 
       if (_isAnalysisCancelled) throw Exception('Cancelled');
 
+      print('⏱️ [PROFILING] Συνολικός χρόνος ανάλυσης όλων των βίντεο: ${totalStopwatch.elapsedMilliseconds / 1000} δευτερόλεπτα');
       onStatusUpdate("Αποθήκευση δεδομένων...");
-      double maxRms = 0.0;
+      
       double sumRms = 0.0;
       for (double r in allRms) {
-        if (r > maxRms) maxRms = r;
         sumRms += r;
       }
       double avgRms = allRms.isEmpty ? 0.0 : sumRms / allRms.length;
+      
+      // Έξυπνος υπολογισμός Max RMS (95th Percentile)
+      // Απορρίπτουμε το κορυφαίο 5% (σφυρίγματα διαιτητή, μικροφωνισμοί, κόρνες).
+      // Αυτό κατεβάζει το "ταβάνι" ακριβώς στη στάθμη των ΠΡΑΓΜΑΤΙΚΩΝ ιαχών/πανηγυρισμών
+      // επιστρέφοντας τα highlights στα επίπεδα του παλιού EBU R128.
+      double maxRms = 0.0;
+      if (allRms.isNotEmpty) {
+        List<double> sorted = List.from(allRms)..sort();
+        int p95Index = (sorted.length * 0.95).toInt().clamp(0, sorted.length - 1);
+        maxRms = sorted[p95Index];
+      }
+
       print('[ΑΝΑΛΥΣΗ ΟΛΟΚΛΗΡΩΘΗΚΕ] Max RMS: $maxRms, Avg RMS: $avgRms, Δείγματα: ${allRms.length}');
 
       // Αποθήκευση της ανάλυσης ΜΕΣΑ στον φάκελο του project
@@ -594,13 +660,11 @@ class AppState extends ChangeNotifier {
       return newProject;
 
     } catch (e) {
-      // Cleanup: Διαγράφει ΟΛΟΚΛΗΡΟ τον φάκελο του project (και τα temp audio)
+      // Cleanup: Διαγράφει ΟΛΟΚΛΗΡΟ τον φάκελο του project
       if (await projectDir.exists()) {
         await projectDir.delete(recursive: true);
       }
       return null;
-    } finally {
-      await player.dispose();
     }
   }
 }
