@@ -4,8 +4,8 @@ import 'dart:convert';
 
 List<Process> flutterProcesses = [];
 bool isQuitting = false; 
+bool isAttachReady = false;
 Timer? debounceTimer;
-Process? logcatProcess; // Κρατάμε αναφορά για να έχουμε ΠΑΝΤΑ ΜΟΝΟ ΕΝΑΝ κατάσκοπο logs
 
 void printMenu() {
   print('====================================================');
@@ -13,7 +13,7 @@ void printMenu() {
   print('====================================================');
   print('ΣΥΝΤΟΜΕΥΣΕΙΣ ΠΛΗΚΤΡΟΛΟΓΙΟΥ:');
   print('  [r] - Hot Reload: Εφαρμογή αλλαγών κώδικα ακαριαία.');
-  print('  [R] - Hot Restart: Πλήρης επανεκκίνηση της εφαρμογής.');
+  print('  [e] - Hot Restart: Πλήρης επανεκκίνηση της εφαρμογής.');
   print('  [a] - Attach: Επανασύνδεση στο κινητό (χειροκίνητα).');
   print('  [b] - Build: Πλήρες Build και εγκατάσταση.');
   print('-----------------------------------------------------');
@@ -34,7 +34,6 @@ void main() async {
   ProcessSignal.sigint.watch().listen((_) {
     isQuitting = true;
     for (var p in flutterProcesses) p.kill();
-    logcatProcess?.kill();
     exit(0);
   });
 
@@ -67,7 +66,6 @@ void main() async {
       isQuitting = true;
       print('\nΤερματισμός...');
       for (var p in flutterProcesses) p.kill();
-      logcatProcess?.kill();
       exit(0);
     } else if (input == 'h' || input == '?') {
       printMenu();
@@ -75,7 +73,6 @@ void main() async {
       isQuitting = true;
       print('\n🧹 Τερματισμός & καθαρισμός (flutter clean)...');
       for (var p in flutterProcesses) p.kill();
-      logcatProcess?.kill();
       Process.runSync('cmd', ['/c', 'cd android && gradlew.bat --stop'], runInShell: true);
       
       try {
@@ -94,8 +91,25 @@ void main() async {
       }
     } else if (input == 'b') {
       startFlutterApp();
+    } else if (input == 'r') {
+      if (!isAttachReady && targetDevice != 'windows') {
+        print('⏳ Περίμενε... Η σύνδεση δεν έχει ολοκληρωθεί ακόμα!');
+      } else {
+        print('🔄 Στάλθηκε εντολή r (Hot Reload) στο Flutter.');
+        for (var p in flutterProcesses) {
+          try { p.stdin.writeln('r'); } catch (_) {}
+        }
+      }
+    } else if (input == 'e') {
+      if (!isAttachReady && targetDevice != 'windows') {
+        print('⏳ Περίμενε... Η σύνδεση δεν έχει ολοκληρωθεί ακόμα!');
+      } else {
+        print('🔄 Στάλθηκε εντολή R (Hot Restart) στο Flutter.');
+        for (var p in flutterProcesses) {
+          try { p.stdin.writeln('R'); } catch (_) {}
+        }
+      }
     } else {
-      // Περνάει την πληκτρολόγηση απευθείας στο Flutter (πχ 'r' ή 'R')
       for (var p in flutterProcesses) {
         try { p.stdin.add(event); } catch (_) {}
       }
@@ -117,18 +131,18 @@ void main() async {
 
           print('\n🤖 [AI ACTION] Εκτέλεση αυτόματου: $action');
           if (action == 'RESTART') {
-            for (var p in flutterProcesses) try { p.stdin.write('R'); } catch (_) {}
+            for (var p in flutterProcesses) try { p.stdin.writeln('R'); } catch (_) {}
           } else if (action == 'CLEAN') {
             print('\n🧹 [AI CLEAN] Απαιτείται καθαρισμός. Κάνε restart τον server [x]!');
           } else {
-            for (var p in flutterProcesses) try { p.stdin.write('r'); } catch (_) {}
+            for (var p in flutterProcesses) try { p.stdin.writeln('r'); } catch (_) {}
           }
         } catch (_) {
-          for (var p in flutterProcesses) try { p.stdin.write('r'); } catch (_) {}
+          for (var p in flutterProcesses) try { p.stdin.writeln('r'); } catch (_) {}
         }
       } else if (path.endsWith('.dart')) {
         // Χειροκίνητη αποθήκευση από εσένα = Ακαριαίο Reload
-        for (var p in flutterProcesses) try { p.stdin.write('r'); } catch (_) {}
+        for (var p in flutterProcesses) try { p.stdin.writeln('r'); } catch (_) {}
       }
     });
   }
@@ -152,6 +166,7 @@ Future<String> detectDevice() async {
 }
 
 void startBlindAttach(String device) async {
+  isAttachReady = false;
   // Καθαρισμός παλιών διεργασιών Attach
   for (var oldP in flutterProcesses) oldP.kill();
   flutterProcesses.clear();
@@ -160,37 +175,19 @@ void startBlindAttach(String device) async {
   final p = await Process.start('flutter', ['attach', '-d', device, '--no-version-check'], runInShell: true);
   flutterProcesses.add(p);
   
-  // Φιλτράρουμε την περιττή φλυαρία του attach
+  // Φιλτράρουμε την περιττή φλυαρία του attach και ψάχνουμε το Ready state
   p.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen((line) {
+    if (line.contains('Flutter run key commands') || line.contains('Syncing files to device') || line.contains('To hot reload changes')) {
+      isAttachReady = true;
+      print('\n✅ [ΕΤΟΙΜΟ] Η σύνδεση ολοκληρώθηκε! Μπορείς να κάνεις Reload/Restart.');
+    }
     if (line.contains('Performing hot') || line.contains('Reloaded') || line.contains('Restarted')) {
       stdout.writeln('[system] $line');
     }
   });
 
-  // Διαχείριση του Logcat: Σκοτώνουμε τον παλιό "κατάσκοπο" πριν βάλουμε νέο
-  if (logcatProcess != null) {
-    logcatProcess!.kill();
-  }
-  
-  await Process.run('adb', ['-s', device, 'logcat', '-c'], runInShell: true);
-  logcatProcess = await Process.start('adb', ['-s', device, 'logcat', 'flutter:V', '*:S'], runInShell: true);
-  
-  logcatProcess!.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen((line) {
-    if (line.contains('flutter')) {
-      if (line.contains('):')) {
-        stdout.writeln(line.substring(line.indexOf('):') + 2).trim());
-      } else {
-        final parts = line.split('flutter');
-        if (parts.length > 1) {
-          stdout.writeln(parts.last.replaceFirst(RegExp(r'^\s*\(.*?\):\s*'), '').trim());
-        } else {
-          stdout.writeln(line.trim());
-        }
-      }
-    }
-  });
-
   p.exitCode.then((code) {
+    isAttachReady = false;
     if (!isQuitting) {
       print('\n⚠️ Το κανάλι επικοινωνίας έκλεισε (Exit code: $code). Αν θες, πάτα [a] για χειροκίνητη επανασύνδεση.');
     }
