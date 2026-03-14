@@ -5,18 +5,14 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:file_selector/file_selector.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_kit_config.dart';
 import 'package:ffmpeg_kit_flutter_new_min/return_code.dart';
-import 'package:ffmpeg_kit_flutter_new_min/ffprobe_kit.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/foundation.dart';
 import 'dart:math' as math;
-import 'dart:typed_data';
 import 'package:window_manager/window_manager.dart';
 
 // ==========================================
@@ -294,11 +290,17 @@ class AppState extends ChangeNotifier {
 
   void toggleLanguage() {
     currentLang = currentLang == 'el' ? 'en' : 'el';
+    print('----------------------------------------------------');
+    print('[USER ACTION] Γλώσσα άλλαξε σε: $currentLang');
+    print('----------------------------------------------------');
     notifyListeners();
   }
 
   void toggleTheme() async {
     isDarkMode = !isDarkMode;
+    print('----------------------------------------------------');
+    print('[USER ACTION] Αλλαγή Theme. Dark Mode: $isDarkMode');
+    print('----------------------------------------------------');
     notifyListeners();
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -437,14 +439,14 @@ class AppState extends ChangeNotifier {
   }
 
   Future<String> _getDesktopFFmpegPath() async {
-    final supportDir = await getApplicationSupportDirectory();
-    final ffmpegFile = File('${supportDir.path}/ffmpeg.exe');
+    final devFile = File('assets/bin/ffmpeg.exe');
+    if (devFile.existsSync()) return devFile.absolute.path;
     
-    if (!await ffmpegFile.exists()) {
-      final byteData = await rootBundle.load('assets/bin/ffmpeg.exe');
-      await ffmpegFile.writeAsBytes(byteData.buffer.asUint8List(byteData.offsetInBytes, byteData.lengthInBytes));
-    }
-    return ffmpegFile.path;
+    final exeDir = File(Platform.resolvedExecutable).parent.path;
+    final releaseFile = File('$exeDir/ffmpeg.exe');
+    if (releaseFile.existsSync()) return releaseFile.absolute.path;
+    
+    throw Exception('Δεν βρέθηκε το ffmpeg.exe!');
   }
 
   // Ανάλυση και δημιουργία Project με Progress Callback και Ακύρωση
@@ -646,6 +648,7 @@ class AppState extends ChangeNotifier {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  print('\n🚀 [SYSTEM] Η ΕΦΑΡΜΟΓΗ ΞΕΚΙΝΗΣΕ ΚΑΙ Η ΣΥΝΔΕΣΗ ΜΕ ΤΟ ΤΕΡΜΑΤΙΚΟ ΕΙΝΑΙ ΕΝΕΡΓΗ!\n');
   
   // Ασπίδα προστασίας: Αν "σκάσει" κάτι, θα δείξει κόκκινη οθόνη με το σφάλμα αντί για μαύρη
   ErrorWidget.builder = (FlutterErrorDetails details) {
@@ -1195,6 +1198,9 @@ class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
   void _showCreateProjectDialog(BuildContext context, AppState state) {
+    print('----------------------------------------------------');
+    print('[USER ACTION] Κλικ στο κουμπί Νέο Project');
+    print('----------------------------------------------------');
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -1267,6 +1273,9 @@ class HomeScreen extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         onLongPress: () => _showRenameDialog(context, project, state),
         onTap: () {
+          print('----------------------------------------------------');
+          print('[USER ACTION] Άνοιγμα Editor για το project: ${project.name}');
+          print('----------------------------------------------------');
           Navigator.push(
             context,
             MaterialPageRoute(
@@ -1359,6 +1368,9 @@ class HomeScreen extends StatelessWidget {
                     ),
                   );
                   if (confirm == true) {
+                    print('----------------------------------------------------');
+                    print('[USER ACTION] Διαγραφή project: ${project.name}');
+                    print('----------------------------------------------------');
                     state.deleteProject(project.id);
                   }
                 },
@@ -1393,6 +1405,9 @@ class HomeScreen extends StatelessWidget {
             icon: const Icon(Icons.bug_report),
             tooltip: 'Εξαγωγή JSON Αναλύσεων',
             onPressed: () async {
+              print('----------------------------------------------------');
+              print('[USER ACTION] Πάτησες το "Ζουζούνι" (Bug Report / Export)');
+              print('----------------------------------------------------');
               try {
                 // Χρήση του εξωτερικού φακέλου της εφαρμογής που είναι ορατός μέσω USB
                 final extDir = await getExternalStorageDirectory();
@@ -1676,13 +1691,14 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
   }
 
   Future<String> _getDesktopFFmpegPath() async {
-    final supportDir = await getApplicationSupportDirectory();
-    final ffmpegFile = File('${supportDir.path}/ffmpeg.exe');
-    if (!await ffmpegFile.exists()) {
-      final byteData = await rootBundle.load('assets/bin/ffmpeg.exe');
-      await ffmpegFile.writeAsBytes(byteData.buffer.asUint8List(byteData.offsetInBytes, byteData.lengthInBytes));
-    }
-    return ffmpegFile.path;
+    final devFile = File('assets/bin/ffmpeg.exe');
+    if (devFile.existsSync()) return devFile.absolute.path;
+    
+    final exeDir = File(Platform.resolvedExecutable).parent.path;
+    final releaseFile = File('$exeDir/ffmpeg.exe');
+    if (releaseFile.existsSync()) return releaseFile.absolute.path;
+    
+    throw Exception('Δεν βρέθηκε το ffmpeg.exe!');
   }
 
   Future<int> _runFFmpeg(List<String> args) async {
@@ -2272,6 +2288,9 @@ class _EditorScreenState extends State<EditorScreen> {
   void _addManualHighlight() {
     final state = Provider.of<AppState>(context, listen: false);
     final currentPos = globalPositionSeconds;
+    print('----------------------------------------------------');
+    print('[USER ACTION] Χειροκίνητο Highlight στο ${currentPos.toStringAsFixed(2)}s');
+    print('----------------------------------------------------');
     
     setState(() {
       widget.project.phases.add(HighlightPhase(
@@ -2683,6 +2702,9 @@ class _EditorScreenState extends State<EditorScreen> {
                                 widget.project.sensitivity = v;
                               },
                               onChangeEnd: (v) {
+                                print('----------------------------------------------------');
+                                print('[USER ACTION] Αλλαγή Sensitivity: ${v.toInt()}');
+                                print('----------------------------------------------------');
                                 _recalcPhases();
                                 state.saveProject(widget.project);
                               },
@@ -2703,6 +2725,9 @@ class _EditorScreenState extends State<EditorScreen> {
                                 widget.project.grouping = v;
                               },
                               onChangeEnd: (v) {
+                                print('----------------------------------------------------');
+                                print('[USER ACTION] Αλλαγή Grouping: ${v.toStringAsFixed(1)}s');
+                                print('----------------------------------------------------');
                                 _recalcPhases();
                                 state.saveProject(widget.project);
                               },
@@ -3094,6 +3119,9 @@ class _EditorScreenState extends State<EditorScreen> {
 
   void _showExportDialog(BuildContext context, String mode) async {
     final highlights = widget.project.phases.where((p) => p.isHighlight && p.isSelected).toList();
+    print('----------------------------------------------------');
+    print('[USER ACTION] Άνοιγμα Export. Mode: $mode. Clips: ${highlights.length}');
+    print('----------------------------------------------------');
     if (highlights.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Δεν υπάρχουν επιλεγμένα Highlights για εξαγωγή!')));
       return;

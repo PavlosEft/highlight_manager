@@ -44,16 +44,70 @@ void main() async {
     exit(0);
   });
 
-  await startFlutterApp();
+  String targetDevice = await detectDevice();
+  bool connected = false;
+
+  if (targetDevice != 'windows') {
+    print('📱 Βρέθηκε Android συσκευή. Αυτόματη εκκίνηση και σύνδεση...');
+    // Καθαρισμός τυχόν κολλημένων tunnels για αποφυγή συγκρούσεων
+    await Process.run('adb', ['-s', targetDevice, 'forward', '--remove-all'], runInShell: true);
+    // Εκκίνηση της εφαρμογής (την ανοίγει αν είναι κλειστή, την φέρνει μπροστά αν είναι ανοιχτή)
+    await Process.run('adb', ['-s', targetDevice, 'shell', 'am', 'start', '-n', 'com.example.highlight_manager/.MainActivity'], runInShell: true);
+    
+    print('⏳ Αναμονή 2 δευτερολέπτων για προετοιμασία της Dart VM...');
+    await Future.delayed(const Duration(seconds: 2));
+
+    for (int i = 1; i <= 3; i++) {
+      print('⏳ Προσπάθεια σύνδεσης (Attach) $i/3...');
+      connected = await tryAttach(targetDevice);
+      if (connected) break;
+      if (i < 3) {
+        print('😴 Αναμονή 2 δευτερολέπτων πριν την επόμενη προσπάθεια...');
+        await Future.delayed(const Duration(seconds: 2));
+      }
+    }
+  }
+
+  bool isAwaitingAttachChoice = false;
+
+  if (!connected) {
+    if (targetDevice != 'windows') {
+      print('\n❌ Αποτυχία σύνδεσης μετά από 3 προσπάθειες.');
+      print('👉 [b] - Πλήρες Build');
+      print('👉 [a] - Ξαναδοκίμασε Attach');
+      print('👉 Ή χρησιμοποίησε οποιαδήποτε άλλη συντόμευση...');
+      isAwaitingAttachChoice = true;
+    } else {
+      await startFlutterApp();
+    }
+  }
 
   try {
-    stdin.lineMode = false;
-    stdin.echoMode = false;
-  } catch (e) {}
+    if (stdin.hasTerminal) {
+      // Προσπάθεια ρύθμισης για άμεση απόκριση πλήκτρων (χωρίς Enter)
+      stdin.lineMode = false;
+      stdin.echoMode = false;
+    }
+  } catch (_) {
+    // Αν αποτύχει στα Windows (errno 87), συνεχίζει κανονικά
+  }
 
   stdin.listen((event) {
     final input = utf8.decode(event).trim().toLowerCase();
     
+    if (isAwaitingAttachChoice) {
+      if (input == 'b') {
+        isAwaitingAttachChoice = false;
+        startFlutterApp();
+        return;
+      } else if (input == 'a') {
+        isAwaitingAttachChoice = false;
+        handleAttach();
+        return;
+      }
+      // Αν πατηθεί κάτι άλλο, συνεχίζει κανονικά για να λειτουργούν οι συντομεύσεις
+    }
+
     if (isConfirmingUndo) {
       handleUndoConfirmation(input);
       return;
@@ -76,7 +130,21 @@ void main() async {
       print('\n🧹 Τερματισμός Gradle Daemons & καθαρισμός (flutter clean)...');
       for (var p in flutterProcesses) p.kill();
       Process.runSync('cmd', ['/c', 'cd android && gradlew.bat --stop'], runInShell: true);
-      Process.runSync('flutter', ['clean'], runInShell: true);
+      
+      try {
+        final buildDir = Directory('build');
+        if (buildDir.existsSync()) {
+          buildDir.deleteSync(recursive: true);
+          print('✅ Επιθετική διαγραφή φακέλου build πέτυχε.');
+        }
+      } catch (e) {
+        print('⚠️ Σφάλμα διαγραφής φακέλου build (Αρχεία κλειδωμένα από τα Windows): $e');
+      }
+
+      final cleanResult = Process.runSync('flutter', ['clean'], runInShell: true);
+      if (cleanResult.stdout.toString().trim().isNotEmpty) print(cleanResult.stdout);
+      if (cleanResult.stderr.toString().trim().isNotEmpty) print('❌ [ΣΦΑΛΜΑ CLEAN]: ${cleanResult.stderr}');
+      
       Process.runSync('flutter', ['pub', 'get'], runInShell: true);
       print('✅ Ολοκληρώθηκε! Κλείσε το παράθυρο και τρέξε ξανά το start_dev.bat');
       exit(0);
@@ -147,25 +215,149 @@ void main() async {
   }
 }
 
-Future<void> startFlutterApp() async {
-  print('🔍 Έλεγχος συσκευών (παίρνει ~1-2 δευτερόλεπτα)...');
-  String targetDevice = 'windows';
+Future<String> detectDevice() async {
   try {
     final result = await Process.run('flutter', ['devices'], runInShell: true);
     if (result.stdout.toString().contains('L8AIB761L865GB7')) {
-      targetDevice = 'L8AIB761L865GB7';
-      print('📱 Βρέθηκε συνδεδεμένο κινητό! Εκκίνηση στο Android...');
-    } else {
-      print('💻 Το κινητό δεν βρέθηκε. Εκκίνηση στα Windows...');
+      return 'L8AIB761L865GB7';
     }
-  } catch (e) {
-    print('💻 Σφάλμα ανίχνευσης. Προεπιλογή στα Windows...');
+  } catch (_) {}
+  return 'windows';
+}
+
+Future<bool> tryAttach(String device) async {
+  for (var oldP in flutterProcesses) {
+    oldP.kill();
+  }
+  flutterProcesses.clear();
+
+  // 1. Έναρξη του Attach για Hot Reload / Restart
+  final p = await Process.start('flutter', ['attach', '-d', device, '--no-version-check'], runInShell: true);
+  final completer = Completer<bool>();
+  
+  final subscription = p.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen((line) {
+    // Φιλτράρουμε τα συστημικά μηνύματα του attach
+    if (line.contains('Flutter run key commands') || line.contains('Syncing files to device')) {
+      if (!completer.isCompleted) completer.complete(true);
+    }
+    if (line.contains('Performing hot') || line.contains('Reloaded') || line.contains('Restarted')) {
+      stdout.writeln('[system] $line');
+    }
+  });
+
+  // 2. ΠΑΡΑΛΛΗΛΟ LOGGER (ADB Logcat): Τραβάει τα logs απευθείας από το Android
+  if (device != 'windows') {
+    print('📡 [LOGGER] Έναρξη απευθείας μετάδοσης logs από τη συσκευή...');
+    // Καθαρισμός του buffer για να βλέπουμε μόνο τα νέα logs κατά τη σύνδεση
+    await Process.run('adb', ['-s', device, 'logcat', '-c'], runInShell: true);
+    
+    final loggerP = await Process.start('adb', ['-s', device, 'logcat', 'flutter:V', '*:S'], runInShell: true);
+    flutterProcesses.add(loggerP);
+    
+    loggerP.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen((line) {
+      // Βελτιωμένη ανίχνευση logs για συσκευές ASUS και διαφορετικά Android formats
+      if (line.contains('flutter')) {
+        if (line.contains('):')) {
+          stdout.writeln(line.substring(line.indexOf('):') + 2).trim());
+        } else {
+          // Fallback για logs που δεν έχουν το κλασικό format (PID)
+          final parts = line.split('flutter');
+          if (parts.length > 1) {
+            stdout.writeln(parts.last.replaceFirst(RegExp(r'^\s*\(.*?\):\s*'), '').trim());
+          } else {
+            stdout.writeln(line.trim());
+          }
+        }
+      }
+    });
+  }
+
+  p.exitCode.then((code) { if (!completer.isCompleted) completer.complete(false); });
+  Future.delayed(const Duration(seconds: 15), () { if (!completer.isCompleted) completer.complete(false); });
+
+  bool success = await completer.future;
+  if (success) {
+    flutterProcesses.add(p);
+    
+    p.exitCode.then((code) {
+      if (!isQuitting) {
+        print('\n⚠️ Η σύνδεση χάθηκε.');
+        handleAttach();
+      }
+    });
+  } else {
+    p.kill();
+    subscription.cancel();
+  }
+  return success;
+}
+
+Future<void> startFlutterApp() async {
+  print('🔍 Προετοιμασία εκκίνησης...');
+  String targetDevice = await detectDevice();
+  if (targetDevice == 'L8AIB761L865GB7') {
+    print('📱 Εκκίνηση Build στο Android...');
+  } else {
+    print('💻 Εκκίνηση στα Windows...');
   }
 
   final p = await Process.start('flutter', ['run', '--no-enable-impeller', '-d', targetDevice], runInShell: true);
   flutterProcesses.add(p);
   final logPrefix = targetDevice == 'windows' ? 'windows' : 'android';
-  p.stdout.transform(utf8.decoder).listen((data) => stdout.write('[$logPrefix] $data'));
+  
+  Stopwatch overallStopwatch = Stopwatch()..start();
+  Stopwatch? stepStopwatch;
+  bool sizeLogged = false;
+
+  p.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen((line) {
+    stdout.writeln('[$logPrefix] $line');
+    
+    if (line.contains('Running Gradle task')) {
+      stepStopwatch = Stopwatch()..start();
+      print('\n[INFO] [PHASE 1] Starting build (Gradle)...');
+    }
+    
+    if (line.contains('Built build') && line.contains('app-debug.apk')) {
+      if (stepStopwatch != null) {
+        stepStopwatch!.stop();
+        print('\n[INFO] [PHASE 1] Build completed in: ${stepStopwatch!.elapsed.inSeconds}s');
+      }
+      
+      if (!sizeLogged) {
+        try {
+          final apkFile = File('build/app/outputs/flutter-apk/app-debug.apk');
+          if (apkFile.existsSync()) {
+            final sizeInMb = apkFile.lengthSync() / (1024 * 1024);
+            print('[INFO] Final APK Size: ${sizeInMb.toStringAsFixed(2)} MB');
+            sizeLogged = true;
+          }
+        } catch (_) {}
+      }
+    }
+    
+    if (line.contains('Installing build') || line.contains('Installing ')) {
+      stepStopwatch = Stopwatch()..start();
+      print('\n[INFO] [PHASE 2] Starting APK transfer and installation (ADB)...');
+    }
+
+    if (line.contains('Syncing files to device')) {
+      if (stepStopwatch != null) {
+        stepStopwatch!.stop();
+        print('\n[INFO] [PHASE 2] Installation completed in: ${stepStopwatch!.elapsed.inSeconds}s');
+      }
+      stepStopwatch = Stopwatch()..start();
+      print('\n[INFO] [PHASE 3] Syncing Flutter files with device...');
+    }
+
+    if (line.contains('Flutter run key commands')) {
+      overallStopwatch.stop();
+      if (stepStopwatch != null) {
+        stepStopwatch!.stop();
+        print('\n[INFO] [PHASE 3] Sync completed in: ${stepStopwatch!.elapsed.inSeconds}s');
+      }
+      print('[INFO] TOTAL wait time (Build + Install + Sync): ${overallStopwatch.elapsed.inSeconds}s');
+    }
+  });
   p.stderr.transform(utf8.decoder).listen((data) => stderr.write('[$logPrefix] $data'));
 
   // Ανιχνευτής απώλειας σύνδεσης (Crash ή αποσύνδεση καλωδίου)
@@ -179,14 +371,7 @@ Future<void> startFlutterApp() async {
     }
   });
 
-  if (targetDevice != 'windows') {
-    try {
-      await Process.run('adb', ['logcat', '-c'], runInShell: true);
-      final logcatP = await Process.start('adb', ['logcat', 'AndroidRuntime:E', 'flutter:E', '*:S'], runInShell: true);
-      flutterProcesses.add(logcatP);
-      logcatP.stdout.transform(utf8.decoder).listen((data) => stdout.write('[APP-CRASH] $data'));
-    } catch (e) {}
-  }
+
 }
 
 Future<void> manageZipsBeforePatch() async {
@@ -296,31 +481,15 @@ void handleGitConfirmation(String input) async {
 }
 
 void handleAttach() async {
-  print('\n⏳ Εκκίνηση Attach... Ψάχνω για τη συσκευή...');
-  String targetDevice = 'windows';
-  try {
-    final result = await Process.run('flutter', ['devices'], runInShell: true);
-    if (result.stdout.toString().contains('L8AIB761L865GB7')) {
-      targetDevice = 'L8AIB761L865GB7';
-      print('📱 Βρέθηκε το κινητό! Σύνδεση με το υπάρχον App...');
-    } else {
-      print('💻 Το κινητό δεν βρέθηκε. Προεπιλογή στα Windows...');
-    }
-  } catch (e) {}
+  print('\n⏳ Επανασύνδεση (Attach)...');
+  String targetDevice = await detectDevice();
+  
+  if (targetDevice != 'windows') {
+    await Process.run('adb', ['-s', targetDevice, 'forward', '--remove-all'], runInShell: true);
+  }
 
-  final p = await Process.start('flutter', ['attach', '-d', targetDevice], runInShell: true);
-  flutterProcesses.add(p);
-  final logPrefix = targetDevice == 'windows' ? 'windows' : 'android';
-  p.stdout.transform(utf8.decoder).listen((data) => stdout.write('[$logPrefix-attach] $data'));
-  p.stderr.transform(utf8.decoder).listen((data) => stderr.write('[$logPrefix-attach] $data'));
-
-  p.exitCode.then((code) {
-    if (!isQuitting) {
-      print('\n\n⚠️ Η σύνδεση Attach διακόπηκε (Exit code: $code).');
-      print('🔄 Προσπάθεια αυτόματης επανασύνδεσης (Attach) σε 3 δευτερόλεπτα...');
-      Future.delayed(const Duration(seconds: 3), () {
-        if (!isQuitting) handleAttach();
-      });
-    }
-  });
+  bool connected = await tryAttach(targetDevice);
+  if (!connected && !isQuitting) {
+    print('❌ Αποτυχία αυτόματης επανασύνδεσης. Δοκίμασε χειροκίνητα με [a].');
+  }
 }
