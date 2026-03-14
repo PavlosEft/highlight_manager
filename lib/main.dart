@@ -266,21 +266,6 @@ Future<Map<String, dynamic>> _analyzePcmTask(Map<String, dynamic> args) async {
     if (endIdx > int16List.length) endIdx = int16List.length;
     if (startIdx >= int16List.length) break;
     
-    // 🚀 SILENCE GATE: Ανίχνευση "νεκρών" σημείων
-    bool hasSound = false;
-    for (int j = startIdx; j < endIdx; j += 5) { 
-      if (int16List[j] > 100 || int16List[j] < -100) { 
-        hasSound = true;
-        break;
-      }
-    }
-
-    if (!hasSound) {
-       isolateRms[step] = 0.0;
-       isolateTimes[step] = (startIdx / sampleRate) + cumulativeTime;
-       continue;
-    }
-
     double sumSquares = 0.0;
     for (int j = startIdx; j < endIdx; j++) {
       final double normalized = int16List[j] / 32768.0;
@@ -463,7 +448,7 @@ class AppState extends ChangeNotifier {
   }
 
   // Ανάλυση και δημιουργία Project με Progress Callback και Ακύρωση
-  Future<Project?> analyzeAndCreateProject(String baseName, List<String> paths, Function(String) onStatusUpdate) async {
+  Future<Project?> analyzeAndCreateProject(String baseName, List<String> paths, Function(String, double) onStatusUpdate) async {
     _isAnalysisCancelled = false;
     String finalName = baseName;
     int counter = 1;
@@ -488,18 +473,14 @@ class AppState extends ChangeNotifier {
     final totalStopwatch = Stopwatch()..start();
 
     try {
+      // 1ο Πέρασμα: Υπολογισμός Συνολικής Διάρκειας (Απαραίτητο για το συνολικό ποσοστό % progress)
       for (int i = 0; i < paths.length; i++) {
         if (_isAnalysisCancelled) throw Exception('Cancelled');
         
-        final stepStopwatch = Stopwatch()..start();
         String path = paths[i];
-        onStatusUpdate("Υπολογισμός διάρκειας ${i + 1}/${paths.length}...");
+        onStatusUpdate("Υπολογισμός διάρκειας ${i + 1}/${paths.length}...", 0.0);
         
         double dur = 0.0;
-        
-        // ΕΠΑΝΑΦΟΡΑ ΣΤΟ MEDIAKIT ΓΙΑ ΑΚΡΙΒΗ ΔΙΑΡΚΕΙΑ
-        // Σε τεράστια/raw βίντεο, τα metadata είναι συχνά σπασμένα και το FFprobe
-        // επιστρέφει λάθος διάρκεια. Το MediaKit διαβάζει το πραγματικό stream.
         final tempPlayer = Player();
         await tempPlayer.open(Media(path), play: false);
         for (int j = 0; j < 30; j++) {
@@ -509,51 +490,57 @@ class AppState extends ChangeNotifier {
         dur = tempPlayer.state.duration.inMilliseconds / 1000.0;
         await tempPlayer.dispose();
         
-        if (dur <= 0.0) dur = 1.0; // Fallback
-        
-        print('⏱️ [PROFILING] Διάρκεια βίντεο ${i+1} βρέθηκε σε ${stepStopwatch.elapsedMilliseconds}ms ($dur sec)');
-        stepStopwatch.reset();
+        if (dur <= 0.0) dur = 1.0; 
 
         totalDur += dur;
         videoDurations.add(dur);
+      }
 
+      // 2ο Πέρασμα: Ανάλυση Ήχου
+      for (int i = 0; i < paths.length; i++) {
         if (_isAnalysisCancelled) throw Exception('Cancelled');
         
-        // Δυναμικός υπολογισμός βάσει των πραγματικών CPU cores της συσκευής.
-        // Το .clamp(2, 6) εξασφαλίζει ότι θα φτιάξει τουλάχιστον 2 chunks,
-        // αλλά ποτέ πάνω από 6, προστατεύοντας τον δίσκο από I/O thrashing.
-        int numChunks = Platform.numberOfProcessors.clamp(2, 6); 
-        onStatusUpdate("Εξαγωγή Ήχου ${i + 1}/${paths.length} (Παράλληλα $numChunks τμήματα)...");
+        String path = paths[i];
+        double dur = videoDurations[i];
         
-        double chunkDur = dur / numChunks;
-        List<String> chunkPaths = [];
-        List<Future<void>> futures = [];
-        int completedChunks = 0;
-
         _activeFfmpegProcesses.clear();
+        
+        List<double> currentRms = [];
+        List<double> currentTimes = [];
+        double currentTime = 0.0;
+        
+        final afFilter = "aformat=channel_layouts=mono,aresample=22050,asetnsamples=512,astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level";
+
+        void processRmsLine(String line) {
+          if (line.contains('lavfi.astats.Overall.RMS_level=')) {
+            final strVal = line.split('=').last.trim();
+            double? db = strVal == '-inf' ? -100.0 : double.tryParse(strVal);
+            if (db != null) {
+              double linear = db <= -100.0 ? 0.0 : math.pow(10, db / 20.0).toDouble();
+              currentRms.add(linear);
+              currentTimes.add(currentTime + cumulativeTime);
+              currentTime += (512.0 / 22050.0);
+              
+              if (currentRms.length % 50 == 0) {
+                double globalProgress = (cumulativeTime + currentTime) / totalDur;
+                onStatusUpdate("Ανάλυση Ήχου ${i + 1}/${paths.length}...", globalProgress.clamp(0.0, 0.99));
+              }
+            }
+          }
+        }
 
         if (Platform.isWindows || Platform.isLinux) {
           final ffmpegExe = await _getDesktopFFmpegPath();
+          final p = await Process.start(
+            ffmpegExe,
+            ['-y', '-i', path, '-vn', '-af', afFilter, '-f', 'null', '-'],
+          );
+          _activeFfmpegProcesses.add(p);
           
-          for (int c = 0; c < numChunks; c++) {
-            double startOffset = c * chunkDur;
-            double duration = (c == numChunks - 1) ? (dur - startOffset) : chunkDur;
-            String chunkPath = '${projectDir.path}/temp_audio_${i}_chunk_$c.pcm';
-            chunkPaths.add(chunkPath);
-
-            final p = await Process.start(
-              ffmpegExe,
-              ['-y', '-ss', startOffset.toStringAsFixed(3), '-t', duration.toStringAsFixed(3), '-discard:v', 'all', '-i', path, '-map', '0:a:0', '-vn', '-af', 'highpass=f=300', '-ac', '1', '-ar', '8000', '-f', 's16le', chunkPath],
-            );
-            _activeFfmpegProcesses.add(p);
-          }
-
-          for (var p in _activeFfmpegProcesses) {
-             final exitCode = await p.exitCode;
-             completedChunks++;
-             onStatusUpdate("Εξαγωγή Ήχου ${i + 1}/${paths.length} ($completedChunks/$numChunks τμήματα)...");
-             if (exitCode != 0 && !_isAnalysisCancelled) throw Exception('FFmpeg failed');
-          }
+          p.stderr.transform(utf8.decoder).transform(const LineSplitter()).listen(processRmsLine);
+          
+          final exitCode = await p.exitCode;
+          if (exitCode != 0 && !_isAnalysisCancelled) throw Exception('FFmpeg failed');
           if (_isAnalysisCancelled) throw Exception('Cancelled');
         } else {
           String ffmpegPath = path;
@@ -564,60 +551,54 @@ class AppState extends ChangeNotifier {
              } catch (_) {}
           }
 
-          for (int c = 0; c < numChunks; c++) {
-            double startOffset = c * chunkDur;
-            double duration = (c == numChunks - 1) ? (dur - startOffset) : chunkDur;
-            String chunkPath = '${projectDir.path}/temp_audio_${i}_chunk_$c.pcm';
-            chunkPaths.add(chunkPath);
-
-            // Γρήγορο seek με -ss ΠΡΙΝ το -i (Το -ss πριν το -i πηδάει ακαριαία στο χρόνο χωρίς να διαβάζει τα δεδομένα!)
-            final cmd = "-y -ss ${startOffset.toStringAsFixed(3)} -t ${duration.toStringAsFixed(3)} -discard:v all -i \"$ffmpegPath\" -map 0:a:0 -vn -af highpass=f=300 -ac 1 -ar 8000 -f s16le \"$chunkPath\"";
-            
-            final completer = Completer<void>();
-            FFmpegKit.executeAsync(
-              cmd,
-              (session) async {
-                final returnCode = await session.getReturnCode();
-                if (ReturnCode.isCancel(returnCode) || _isAnalysisCancelled) {
-                  completer.completeError(Exception('Cancelled'));
-                } else {
-                  completedChunks++;
-                  onStatusUpdate("Εξαγωγή Ήχου ${i + 1}/${paths.length} ($completedChunks/$numChunks τμήματα)...");
-                  completer.complete();
+          final cmd = "-y -i \"$ffmpegPath\" -vn -af \"$afFilter\" -f null -";
+          
+          final completer = Completer<void>();
+          FFmpegKit.executeAsync(
+            cmd,
+            (session) async {
+              final returnCode = await session.getReturnCode();
+              if (ReturnCode.isCancel(returnCode) || _isAnalysisCancelled) {
+                completer.completeError(Exception('Cancelled'));
+              } else {
+                completer.complete();
+              }
+            },
+            (log) {
+              final msg = log.getMessage();
+              if (msg != null) {
+                final lines = msg.split('\n');
+                for (var line in lines) {
+                  processRmsLine(line);
                 }
               }
-            );
-            futures.add(completer.future);
-          }
-          await Future.wait(futures);
+            }
+          );
+          await completer.future;
         }
 
-        print('⏱️ [PROFILING] Εξαγωγή Ήχου FFmpeg (Παράλληλη, $numChunks chunks) ολοκληρώθηκε σε ${stepStopwatch.elapsedMilliseconds}ms');
-        stepStopwatch.reset();
-
-        if (_isAnalysisCancelled) throw Exception('Cancelled');
-        onStatusUpdate("Ανάλυση Δεδομένων ${i + 1}/${paths.length} (Στο παρασκήνιο)...");
-
-        double currentChunkCumulative = cumulativeTime;
-        for (int c = 0; c < numChunks; c++) {
-           final result = await compute(_analyzePcmTask, {
-             'path': chunkPaths[c],
-             'cumulativeTime': currentChunkCumulative,
-           });
-           allRms.addAll(result['rms'] as List<double>);
-           allTimes.addAll(result['times'] as List<double>);
-           currentChunkCumulative += (c == numChunks - 1) ? (dur - c * chunkDur) : chunkDur;
+        List<double> smoothedRms = [];
+        for (int k = 0; k < currentRms.length; k++) {
+           double sumSq = 0.0;
+           int count = 0;
+           for (int w = 0; w < 4; w++) {
+             if (k + w < currentRms.length) {
+               double r = currentRms[k + w];
+               sumSq += (r * r);
+               count++;
+             }
+           }
+           smoothedRms.add(count > 0 ? math.sqrt(sumSq / count) : 0.0);
         }
-
-        print('⏱️ [PROFILING] Ανάλυση PCM (Dart - Chunks) ολοκληρώθηκε σε ${stepStopwatch.elapsedMilliseconds}ms');
-
+        
+        allRms.addAll(smoothedRms);
+        allTimes.addAll(currentTimes);
         cumulativeTime += dur;
       }
 
       if (_isAnalysisCancelled) throw Exception('Cancelled');
 
-      print('⏱️ [PROFILING] Συνολικός χρόνος ανάλυσης όλων των βίντεο: ${totalStopwatch.elapsedMilliseconds / 1000} δευτερόλεπτα');
-      onStatusUpdate("Αποθήκευση δεδομένων...");
+      onStatusUpdate("Αποθήκευση δεδομένων...", 1.0);
       
       double sumRms = 0.0;
       for (double r in allRms) {
@@ -625,20 +606,11 @@ class AppState extends ChangeNotifier {
       }
       double avgRms = allRms.isEmpty ? 0.0 : sumRms / allRms.length;
       
-      // Έξυπνος υπολογισμός Max RMS (95th Percentile)
-      // Απορρίπτουμε το κορυφαίο 5% (σφυρίγματα διαιτητή, μικροφωνισμοί, κόρνες).
-      // Αυτό κατεβάζει το "ταβάνι" ακριβώς στη στάθμη των ΠΡΑΓΜΑΤΙΚΩΝ ιαχών/πανηγυρισμών
-      // επιστρέφοντας τα highlights στα επίπεδα του παλιού EBU R128.
       double maxRms = 0.0;
       if (allRms.isNotEmpty) {
-        List<double> sorted = List.from(allRms)..sort();
-        int p95Index = (sorted.length * 0.95).toInt().clamp(0, sorted.length - 1);
-        maxRms = sorted[p95Index];
+        maxRms = allRms.reduce(math.max);
       }
 
-      print('[ΑΝΑΛΥΣΗ ΟΛΟΚΛΗΡΩΘΗΚΕ] Max RMS: $maxRms, Avg RMS: $avgRms, Δείγματα: ${allRms.length}');
-
-      // Αποθήκευση της ανάλυσης ΜΕΣΑ στον φάκελο του project
       final analysisFile = File('${projectDir.path}/analysis.json');
       final analysisData = {
         'max_rms': maxRms,
@@ -660,7 +632,6 @@ class AppState extends ChangeNotifier {
       return newProject;
 
     } catch (e) {
-      // Cleanup: Διαγράφει ΟΛΟΚΛΗΡΟ τον φάκελο του project
       if (await projectDir.exists()) {
         await projectDir.delete(recursive: true);
       }
@@ -841,42 +812,112 @@ class ProcessingDialog extends StatefulWidget {
 
 class _ProcessingDialogState extends State<ProcessingDialog> {
   String status = "Προετοιμασία...";
+  double progress = 0.0;
   bool isCancelled = false;
+  DateTime? startTime;
+  Timer? timer;
+  String elapsedTimeStr = "00:00";
+  String etaStr = "--:--";
+
+  String _formatDuration(Duration d) {
+    int m = d.inMinutes.remainder(60);
+    int s = d.inSeconds.remainder(60);
+    int h = d.inHours;
+    if (h > 0) return "${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}";
+    return "${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}";
+  }
 
   @override
   void initState() {
     super.initState();
+    startTime = DateTime.now();
+    timer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (mounted && startTime != null && !isCancelled && progress < 1.0) {
+        final elapsed = DateTime.now().difference(startTime!);
+        final elapsedSec = elapsed.inSeconds;
+        
+        setState(() {
+          elapsedTimeStr = _formatDuration(elapsed);
+          if (progress > 0.03) { 
+            final totalEstimatedSec = elapsedSec / progress;
+            final remainingSec = totalEstimatedSec - elapsedSec;
+            etaStr = _formatDuration(Duration(seconds: remainingSec.toInt()));
+          }
+        });
+      }
+    });
     _startProcess();
+  }
+
+  @override
+  void dispose() {
+    timer?.cancel();
+    super.dispose();
   }
 
   void _startProcess() async {
     final project = await widget.state.analyzeAndCreateProject(
       widget.baseName,
       widget.paths,
-      (newStatus) {
-        if (mounted) setState(() => status = newStatus);
+      (newStatus, newProgress) {
+        if (mounted) {
+          setState(() {
+            status = newStatus;
+            progress = newProgress;
+          });
+        }
       }
     );
     if (mounted) {
-      Navigator.pop(context, project != null); // Επιστρέφει true αν πετύχει, false αν ακυρωθεί
+      Navigator.pop(context, project != null);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = MediaQuery.of(context).size.width > 600;
     return AlertDialog(
+      insetPadding: isDesktop ? const EdgeInsets.symmetric(horizontal: 40.0, vertical: 24.0) : EdgeInsets.zero,
+      shape: isDesktop ? null : const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
       title: const FittedBox(
         fit: BoxFit.scaleDown,
         alignment: Alignment.centerLeft,
         child: Text('Επεξεργασία', style: TextStyle(fontWeight: FontWeight.bold)),
       ),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const CircularProgressIndicator(),
-          const SizedBox(height: 16),
-          Text(status, textAlign: TextAlign.center),
-        ],
+      content: SizedBox(
+        width: isDesktop ? 400 : MediaQuery.of(context).size.width,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            LinearProgressIndicator(value: progress > 0 ? progress : null),
+            const SizedBox(height: 16),
+            Text(status, textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                Column(
+                  children: [
+                    const Text('Χρόνος', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    Text(elapsedTimeStr, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  ],
+                ),
+                Column(
+                  children: [
+                    const Text('Πρόοδος', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    Text('${(progress * 100).toStringAsFixed(1)}%', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  ],
+                ),
+                Column(
+                  children: [
+                    const Text('Εκτίμηση', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    Text(etaStr, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  ],
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
       actions: [
         TextButton(
@@ -1348,6 +1389,59 @@ class HomeScreen extends StatelessWidget {
         centerTitle: true,
         elevation: 2,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.bug_report),
+            tooltip: 'Εξαγωγή JSON Αναλύσεων',
+            onPressed: () async {
+              try {
+                // Χρήση του εξωτερικού φακέλου της εφαρμογής που είναι ορατός μέσω USB
+                final extDir = await getExternalStorageDirectory();
+                if (extDir == null) {
+                  if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Δεν βρέθηκε εξωτερικός χώρος')));
+                  return;
+                }
+
+                final exportPath = '${extDir.path}/JSON_Exports';
+                final exportDir = Directory(exportPath);
+                if (!exportDir.existsSync()) exportDir.createSync();
+
+                final appDir = await getApplicationDocumentsDirectory();
+                final hmDir = Directory('${appDir.path}/HighlightManager');
+                int count = 0;
+
+                if (hmDir.existsSync()) {
+                  for (var entity in hmDir.listSync()) {
+                    if (entity is Directory) {
+                      final analysisFile = File('${entity.path}/analysis.json');
+                      final projectFile = File('${entity.path}/project.json');
+                      if (analysisFile.existsSync() && projectFile.existsSync()) {
+                        String pName = entity.path.split(Platform.pathSeparator).last;
+                        try {
+                          final pData = jsonDecode(projectFile.readAsStringSync());
+                          pName = pData['name'] ?? pName;
+                        } catch(_) {}
+                        final safeName = pName.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
+                        analysisFile.copySync('$exportPath/analysis_$safeName.json');
+                        count++;
+                      }
+                    }
+                  }
+                }
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('✅ Εξήχθησαν $count JSON!\nΒρίσκονται στο:\n$exportPath (Δες μέσω USB)'),
+                      duration: const Duration(seconds: 8),
+                    )
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('❌ Σφάλμα: $e')));
+                }
+              }
+            },
+          ),
           IconButton(
             iconSize: iconSize,
             icon: Icon(state.isDarkMode ? Icons.wb_sunny : Icons.nightlight_round),

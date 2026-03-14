@@ -162,7 +162,7 @@ Future<void> startFlutterApp() async {
     print('💻 Σφάλμα ανίχνευσης. Προεπιλογή στα Windows...');
   }
 
-  final p = await Process.start('flutter', ['run', '--release', '--no-enable-impeller', '-d', targetDevice], runInShell: true);
+  final p = await Process.start('flutter', ['run', '--no-enable-impeller', '-d', targetDevice], runInShell: true);
   flutterProcesses.add(p);
   final logPrefix = targetDevice == 'windows' ? 'windows' : 'android';
   p.stdout.transform(utf8.decoder).listen((data) => stdout.write('[$logPrefix] $data'));
