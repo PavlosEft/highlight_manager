@@ -21,7 +21,7 @@ void main() async {
   printMenu();
   
   final backupDir = Directory('Backups');
-  if (!backupDir.existsSync()) backupDir.createSync();
+  if (!backupDir.existsSync()) backupDir.createSync(); 
 
   try {
     if (stdin.hasTerminal) {
@@ -56,21 +56,30 @@ void main() async {
     }
   });
 
-  String lastClipboard = await getClipboard();
+  String lastSequence = '0';
 
   Timer.periodic(const Duration(seconds: 1), (timer) async {
-    final clipboard = await getClipboard();
-    if (clipboard.isNotEmpty && clipboard != lastClipboard && clipboard.contains('<HM_PATCH>')) {
-      lastClipboard = clipboard;
-      print('\n✨ [AI PATCHER] Νέος κώδικας εντοπίστηκε! Προετοιμασία backup...');
+    final rawData = await getClipboard();
+    if (rawData.isEmpty) return; 
+
+    final parts = rawData.split(':::CLIP_SEQ:::');
+    if (parts.length < 2) return; 
+
+    final currentSequence = parts[0].trim();
+    final clipboard = parts.sublist(1).join(':::CLIP_SEQ:::');
+
+    if (currentSequence != lastSequence && clipboard.contains('<HM_PATCH>')) {
+      lastSequence = currentSequence;
       
-      await manageZipsBeforePatch();
-      await createCurrentZip();
-      
-      print('⏳ Εφαρμογή αλλαγών...');
+      print('\n⏳ Εφαρμογή αλλαγών...');
       bool success = applyPatch(clipboard);
       
       if (success) {
+        print('✨ [AI PATCHER] Το patch εφαρμόστηκε επιτυχώς! Δημιουργία snapshot...');
+        
+        await manageZipsBeforePatch();
+        await createCurrentZip(); 
+
         final actionRegex = RegExp(r'<ACTION>(.*?)</ACTION>', dotAll: true);
         final actionMatch = actionRegex.firstMatch(clipboard);
         String action = 'RELOAD'; 
@@ -95,10 +104,11 @@ void main() async {
 
 Future<String> getClipboard() async {
   try {
+    // Χρήση triple-quotes r''' για την αποφυγή σφαλμάτων με τις διπλές εισαγωγικές της PowerShell
     final result = await Process.run('powershell', [
       '-NoProfile',
       '-Command',
-      '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-Clipboard -Raw'
+      r'''$ErrorActionPreference = 'SilentlyContinue'; $code = '[DllImport("user32.dll")] public static extern uint GetClipboardSequenceNumber();'; $type = Add-Type -MemberDefinition $code -Name 'WinCB' -Namespace 'Win32' -PassThru; $seq = $type::GetClipboardSequenceNumber(); $txt = Get-Clipboard -Raw; if ($txt -eq $null) { $txt = '' }; Write-Output ($seq.ToString() + ':::CLIP_SEQ:::' + $txt)'''
     ], stdoutEncoding: utf8, runInShell: true);
     return result.stdout.toString().trim();
   } catch (e) {
@@ -112,7 +122,7 @@ bool applyPatch(String rawClipboard) {
     final patchRegex = RegExp(r'<HM_PATCH>(.*?)</HM_PATCH>', dotAll: true);
     final patches = patchRegex.allMatches(text);
 
-    if (patches.isEmpty) return false;
+    if (patches.isEmpty) return false; 
 
     Map<String, String> fileContents = {};
     Map<String, String> newFileContents = {};
@@ -176,7 +186,7 @@ Future<void> manageZipsBeforePatch() async {
 Future<void> createCurrentZip() async {
   final now = DateTime.now();
   final timestamp = "${now.day}-${now.month}-${now.year}_${now.hour}-${now.minute}-${now.second}";
-  final zipName = "SourceCode_$timestamp.zip";
+  final zipName = "SourceCode_$timestamp.zip"; 
   
   final targets = ['lib', 'tool', 'AI_INSTRUCTIONS.txt', 'pubspec.yaml', 'start_dev.bat', 'zip_source_code.bat'];
   final existingTargets = targets.where((t) => FileSystemEntity.typeSync(t) != FileSystemEntityType.notFound).toList();
@@ -196,7 +206,7 @@ Future<void> createOkZip() async {
   print('\n⏳ Δημιουργία Μόνιμου (OK) Snapshot...');
   final now = DateTime.now();
   final timestamp = "${now.day}-${now.month}-${now.year}_${now.hour}-${now.minute}-${now.second}";
-  final zipName = "SourceCode_$timestamp(OK).zip";
+  final zipName = "SourceCode_$timestamp(OK).zip"; 
   
   final targets = ['lib', 'tool', 'AI_INSTRUCTIONS.txt', 'pubspec.yaml', 'start_dev.bat', 'zip_source_code.bat'];
   final existingTargets = targets.where((t) => FileSystemEntity.typeSync(t) != FileSystemEntityType.notFound).toList();
@@ -235,11 +245,10 @@ void handleUndoConfirmation(String input) async {
       final fileName = lastZip.path.split(Platform.pathSeparator).last;
       
       await lastZip.rename(fileName);
-      await Process.run('tar.exe', ['-x', '-f', fileName], runInShell: true);
+      await Process.run('tar.exe', ['-x', '-f', fileName], runInShell: true); 
       
       print('Η επαναφορά ολοκληρώθηκε! (Αρχείο: $fileName)');
       
-      // Ειδοποιούμε τον dev_server να κάνει Restart
       try {
         File('tool/.trigger_reload').writeAsStringSync('${DateTime.now().toIso8601String()}|RESTART');
         print('🔄 Στάλθηκε εντολή RESTART στον Dev Server.');
@@ -258,7 +267,7 @@ void handleGitConfirmation(String input) async {
     final timestamp = "${now.day}/${now.month}/${now.year} ${now.hour}:${now.minute}:${now.second}";
     
     await Process.run('git', ['add', '.'], runInShell: true);
-    final commitResult = await Process.run('git', ['commit', '-m', 'Auto commit from AI Patcher - $timestamp'], runInShell: true);
+    final commitResult = await Process.run('git', ['commit', '-m', 'Auto commit from AI Patcher - $timestamp'], runInShell: true); 
     print(commitResult.stdout);
     
     final pushResult = await Process.run('git', ['push'], runInShell: true);
