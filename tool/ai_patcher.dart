@@ -240,12 +240,23 @@ void handleUndoConfirmation(String input) async {
     if (backupFiles.isEmpty) {
       print('❌ Δεν βρέθηκαν backups για επαναφορά.');
     } else {
-      backupFiles.sort((a, b) => a.path.compareTo(b.path));
+      backupFiles.sort((a, b) => a.statSync().modified.compareTo(b.statSync().modified));
       final lastZip = backupFiles.last as File;
       final fileName = lastZip.path.split(Platform.pathSeparator).last;
       
       await lastZip.rename(fileName);
       await Process.run('tar.exe', ['-x', '-f', fileName], runInShell: true); 
+      
+      final dirs = [Directory('lib'), Directory('tool')];
+      for (var dir in dirs) {
+        if (dir.existsSync()) {
+          for (var file in dir.listSync(recursive: true).whereType<File>()) {
+            if (file.path.endsWith('.dart')) {
+              try { file.setLastModifiedSync(DateTime.now()); } catch (_) {}
+            }
+          }
+        }
+      }
       
       print('Η επαναφορά ολοκληρώθηκε! (Αρχείο: $fileName)');
       
