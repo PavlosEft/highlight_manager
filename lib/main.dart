@@ -1482,10 +1482,10 @@ class HomeScreen extends StatelessWidget {
                     height: isDesktop ? 56 : 48,
                     child: FilledButton.icon(
                     onPressed: () => _showCreateProjectDialog(context, state),
-                    icon: const Icon(Icons.add, size: 28),
+                    icon: const Icon(Icons.add_circle_outline, size: 28),
                     label: Text(state.t('new_project'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                     style: FilledButton.styleFrom(
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(32)),
                     ),
                   ),
                 ),

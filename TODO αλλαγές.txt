@@ -1,0 +1,238 @@
+Το Gemini είπε
+Πολύ ωραία παρατήρηση! Ας τα πάρουμε με τη σειρά:
+
+1. Σχετικά με την αρχική εκκίνηση (όταν ανοίγεις το μαύρο παράθυρο):
+Με τη νέα προσέγγιση (δηλαδή χρησιμοποιώντας το κανονικό flutter run), η εφαρμογή θα συνεχίσει να ανοίγει και να έρχεται αυτόματα μπροστά στο κινητό σου, σε όποια κατάσταση κι αν ήταν.
+Η μόνη διαφορά είναι ότι δεν θα είναι το ίδιο "ακαριαίο" στο πρώτο δευτερόλεπτο. Πριν, το script χρησιμοποιούσε μια εντολή (adb shell am start) που "διέταζε" το Android να πετάξει την οθόνη μπροστά βίαια, πριν καν προλάβει να συνδεθεί το Flutter. Τώρα, το flutter run θα κάνει πρώτα έναν γρήγορο έλεγχο (μήπως χρειάζεται build) και μετά θα την ανοίξει. Άρα θα έρχεται μπροστά, αλλά ίσως παίρνει 2-3 δευτερόλεπτα παραπάνω στην αρχή.
+
+2. Σχετικά με τα Restart (e) και Reload (r):
+Από τη "μάνα" τους, το Hot Reload και το Hot Restart του Flutter δεν φέρνουν την εφαρμογή στο προσκήνιο αν κοιτάς κάτι άλλο (π.χ. τον browser) ή αν την έχεις ελαχιστοποιήσει. Ανανεώνουν απλώς τον κώδικα αθόρυβα.
+ΟΜΩΣ, επειδή εμείς έχουμε τον δικό μας Dev Server (το dev_server.dart), μπορούμε να το κάνουμε να δουλεύει ακριβώς όπως το φαντάστηκες!
+
+Μπορούμε να προσθέσουμε μια λογική που θα λέει:
+Όποτε πατάς r ή e (ή όποτε γίνεται αυτόματο reload από το AI Patcher), στείλε πρώτα μια γρήγορη εντολή στο κινητό για να φέρει το παραθύρι της εφαρμογής μπροστά-μπροστά, και αμέσως μετά κάνε την ανανέωση του κώδικα.
+
+Είναι εξαιρετική ιδέα για να δουλεύεις πιο γρήγορα χωρίς να ψάχνεις το κινητό σου. Θέλεις να προχωρήσουμε τώρα σε αυτή την προσθήκη και να σου γράψω τον κώδικα για να το δοκιμάσουμε;
+
+
+
+
+<ACTION>RESTART</ACTION>
+
+<HM_PATCH>
+<FILE>tool/dev_server.dart</FILE>
+<REPLACE>
+List<Process> flutterProcesses = [];
+bool isQuitting = false; 
+bool isAttachReady = false;
+Timer? debounceTimer;
+</REPLACE>
+<WITH>
+List<Process> flutterProcesses = [];
+bool isQuitting = false; 
+Timer? debounceTimer;
+</WITH>
+</HM_PATCH>
+
+<HM_PATCH>
+<FILE>tool/dev_server.dart</FILE>
+<REPLACE>
+void printMenu() {
+  print('====================================================');
+  print('⚡ HIGHLIGHT MANAGER - FAST DEV SERVER');
+  print('====================================================');
+  print('ΣΥΝΤΟΜΕΥΣΕΙΣ ΠΛΗΚΤΡΟΛΟΓΙΟΥ:');
+  print('  [r] - Hot Reload: Εφαρμογή αλλαγών κώδικα ακαριαία.');
+  print('  [e] - Hot Restart: Πλήρης επανεκκίνηση της εφαρμογής.');
+  print('  [a] - Attach: Επανασύνδεση στο κινητό (χειροκίνητα).');
+  print('  [b] - Build: Πλήρες Build και εγκατάσταση.');
+  print('-----------------------------------------------------');
+  print('  [h] - Help: Εμφάνιση αυτού του μενού.');
+  print('  [x] - Clean Workspace: Λύνει προβλήματα (flutter clean).');
+  print('  [q] - Quit: Τερματισμός του Server.');
+  print('====================================================');
+}
+</REPLACE>
+<WITH>
+void printMenu() {
+  print('====================================================');
+  print('⚡ HIGHLIGHT MANAGER - FAST DEV SERVER');
+  print('====================================================');
+  print('ΣΥΝΤΟΜΕΥΣΕΙΣ ΠΛΗΚΤΡΟΛΟΓΙΟΥ:');
+  print('  [r] - Hot Reload: Εφαρμογή αλλαγών κώδικα ακαριαία.');
+  print('  [e] - Hot Restart: Πλήρης επανεκκίνηση της εφαρμογής.');
+  print('  [b] - Build / Run: Εκκίνηση εφαρμογής.');
+  print('-----------------------------------------------------');
+  print('  [h] - Help: Εμφάνιση αυτού του μενού.');
+  print('  [x] - Clean Workspace: Λύνει προβλήματα (flutter clean).');
+  print('  [q] - Quit: Τερματισμός του Server.');
+  print('====================================================');
+}
+</WITH>
+</HM_PATCH>
+
+<HM_PATCH>
+<FILE>tool/dev_server.dart</FILE>
+<REPLACE>
+  String targetDevice = await detectDevice();
+
+  if (targetDevice != 'windows') {
+    print('📱 Βρέθηκε Android. Εκκίνηση εφαρμογής και σύνδεση στο παρασκήνιο...');
+    await Process.run('adb', ['-s', targetDevice, 'forward', '--remove-all'], runInShell: true);
+    await Process.run('adb', ['-s', targetDevice, 'shell', 'am', 'start', '-n', 'com.example.highlight_manager/.MainActivity'], runInShell: true);
+    
+    await Future.delayed(const Duration(seconds: 2));
+
+    // Μία και μοναδική προσπάθεια (Τυφλή εμπιστοσύνη)
+    startBlindAttach(targetDevice);
+  } else {
+    await startFlutterApp();
+  }
+
+  try {
+</REPLACE>
+<WITH>
+  String targetDevice = await detectDevice();
+
+  await startFlutterApp();
+
+  try {
+</WITH>
+</HM_PATCH>
+
+<HM_PATCH>
+<FILE>tool/dev_server.dart</FILE>
+<REPLACE>
+    } else if (input == 'a') {
+      if (targetDevice != 'windows') {
+        print('\n⏳ Χειροκίνητη επανασύνδεση (Attach)...');
+        startBlindAttach(targetDevice);
+      }
+    } else if (input == 'b') {
+      startFlutterApp();
+    } else if (input == 'r') {
+      if (!isAttachReady && targetDevice != 'windows') {
+        print('⏳ Περίμενε... Η σύνδεση δεν έχει ολοκληρωθεί ακόμα!');
+      } else {
+        print('🔄 Στάλθηκε εντολή r (Hot Reload) στο Flutter.');
+        for (var p in flutterProcesses) {
+          try { p.stdin.writeln('r'); } catch (_) {}
+        }
+      }
+    } else if (input == 'e') {
+      if (!isAttachReady && targetDevice != 'windows') {
+        print('⏳ Περίμενε... Η σύνδεση δεν έχει ολοκληρωθεί ακόμα!');
+      } else {
+        print('🔄 Στάλθηκε εντολή R (Hot Restart) στο Flutter.');
+        for (var p in flutterProcesses) {
+          try { p.stdin.writeln('R'); } catch (_) {}
+        }
+      }
+    } else {
+</REPLACE>
+<WITH>
+    } else if (input == 'b') {
+      startFlutterApp();
+    } else if (input == 'r') {
+      bringAppToForeground(targetDevice);
+      print('🔄 Στάλθηκε εντολή r (Hot Reload) στο Flutter.');
+      for (var p in flutterProcesses) {
+        try { p.stdin.writeln('r'); } catch (_) {}
+      }
+    } else if (input == 'e') {
+      bringAppToForeground(targetDevice);
+      print('🔄 Στάλθηκε εντολή R (Hot Restart) στο Flutter.');
+      for (var p in flutterProcesses) {
+        try { p.stdin.writeln('R'); } catch (_) {}
+      }
+    } else {
+</WITH>
+</HM_PATCH>
+
+<HM_PATCH>
+<FILE>tool/dev_server.dart</FILE>
+<REPLACE>
+          if (action == 'RESTART') {
+            for (var p in flutterProcesses) try { p.stdin.writeln('R'); } catch (_) {}
+          } else if (action == 'CLEAN') {
+            print('\n🧹 [AI CLEAN] Απαιτείται καθαρισμός. Κάνε restart τον server [x]!');
+          } else {
+            for (var p in flutterProcesses) try { p.stdin.writeln('r'); } catch (_) {}
+          }
+        } catch (_) {
+          for (var p in flutterProcesses) try { p.stdin.writeln('r'); } catch (_) {}
+        }
+      } else if (path.endsWith('.dart')) {
+        // Χειροκίνητη αποθήκευση από εσένα = Ακαριαίο Reload
+        for (var p in flutterProcesses) try { p.stdin.writeln('r'); } catch (_) {}
+      }
+    });
+  }
+</REPLACE>
+<WITH>
+          bringAppToForeground(targetDevice);
+          if (action == 'RESTART') {
+            for (var p in flutterProcesses) try { p.stdin.writeln('R'); } catch (_) {}
+          } else if (action == 'CLEAN') {
+            print('\n🧹 [AI CLEAN] Απαιτείται καθαρισμός. Κάνε restart τον server [x]!');
+          } else {
+            for (var p in flutterProcesses) try { p.stdin.writeln('r'); } catch (_) {}
+          }
+        } catch (_) {
+          bringAppToForeground(targetDevice);
+          for (var p in flutterProcesses) try { p.stdin.writeln('r'); } catch (_) {}
+        }
+      } else if (path.endsWith('.dart')) {
+        // Χειροκίνητη αποθήκευση από εσένα = Ακαριαίο Reload
+        bringAppToForeground(targetDevice);
+        for (var p in flutterProcesses) try { p.stdin.writeln('r'); } catch (_) {}
+      }
+    });
+  }
+</WITH>
+</HM_PATCH>
+
+<HM_PATCH>
+<FILE>tool/dev_server.dart</FILE>
+<REPLACE>
+void startBlindAttach(String device) async {
+  isAttachReady = false;
+  // Καθαρισμός παλιών διεργασιών Attach
+  for (var oldP in flutterProcesses) oldP.kill();
+  flutterProcesses.clear();
+
+  print('🔌 Ξεκινάει το Attach (Κανάλι επικοινωνίας ανοιχτό)...');
+  final p = await Process.start('flutter', ['attach', '-d', device, '--no-version-check'], runInShell: true);
+  flutterProcesses.add(p);
+  
+  // Φιλτράρουμε την περιττή φλυαρία του attach και ψάχνουμε το Ready state
+  p.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen((line) {
+    if (line.contains('Flutter run key commands') || line.contains('Syncing files to device') || line.contains('To hot reload changes')) {
+      isAttachReady = true;
+      print('\n✅ [ΕΤΟΙΜΟ] Η σύνδεση ολοκληρώθηκε! Μπορείς να κάνεις Reload/Restart.');
+    }
+    if (line.contains('Performing hot') || line.contains('Reloaded') || line.contains('Restarted')) {
+      stdout.writeln('[system] $line');
+    }
+  });
+
+  p.exitCode.then((code) {
+    isAttachReady = false;
+    if (!isQuitting) {
+      print('\n⚠️ Το κανάλι επικοινωνίας έκλεισε (Exit code: $code). Αν θες, πάτα [a] για χειροκίνητη επανασύνδεση.');
+    }
+  });
+}
+
+Future<void> startFlutterApp() async {
+</REPLACE>
+<WITH>
+void bringAppToForeground(String device) {
+  if (device != 'windows') {
+    Process.run('adb', ['-s', device, 'shell', 'am', 'start', '-n', 'com.example.highlight_manager/.MainActivity'], runInShell: true);
+  }
+}
+
+Future<void> startFlutterApp() async {
+</WITH>
+</HM_PATCH>

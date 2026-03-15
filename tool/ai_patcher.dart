@@ -56,46 +56,48 @@ void main() async {
     }
   });
 
-  String lastSequence = '0';
+  String lastClipboardText = '';
 
-  Timer.periodic(const Duration(seconds: 1), (timer) async {
-    final rawData = await getClipboard();
-    if (rawData.isEmpty) return; 
+  void scheduleNextCheck() {
+    Timer(const Duration(seconds: 1), () async {
+      final rawData = await getClipboard();
 
-    final parts = rawData.split(':::CLIP_SEQ:::');
-    if (parts.length < 2) return; 
-
-    final currentSequence = parts[0].trim();
-    final clipboard = parts.sublist(1).join(':::CLIP_SEQ:::');
-
-    if (currentSequence != lastSequence && clipboard.contains('<HM_PATCH>')) {
-      lastSequence = currentSequence;
-      
-      print('\n⏳ Εφαρμογή αλλαγών...');
-      bool success = applyPatch(clipboard);
-      
-      if (success) {
-        print('✨ [AI PATCHER] Το patch εφαρμόστηκε επιτυχώς! Δημιουργία snapshot...');
+      // Ελέγχουμε αν υπάρχει νέο κείμενο και αν περιέχει το HM_PATCH
+      if (rawData.isNotEmpty && rawData != lastClipboardText && rawData.contains('<HM_PATCH>')) {
+        lastClipboardText = rawData;
         
-        await manageZipsBeforePatch();
-        await createCurrentZip(); 
+        print('\n⏳ Εφαρμογή αλλαγών...');
+        bool success = applyPatch(rawData);
+        
+        if (success) {
+          print('✨ [AI PATCHER] Το patch εφαρμόστηκε επιτυχώς! Δημιουργία snapshot...');
+          
+          await manageZipsBeforePatch();
+          await createCurrentZip(); 
 
-        final actionRegex = RegExp(r'<ACTION>(.*?)</ACTION>', dotAll: true);
-        final actionMatch = actionRegex.firstMatch(clipboard);
-        String action = 'RELOAD'; 
-        if (actionMatch != null) {
-          action = actionMatch.group(1)!.trim().toUpperCase();
+          final actionRegex = RegExp(r'<ACTION>(.*?)</ACTION>', dotAll: true);
+          final actionMatch = actionRegex.firstMatch(rawData);
+          String action = 'RELOAD'; 
+          if (actionMatch != null) {
+            action = actionMatch.group(1)!.trim().toUpperCase();
+          }
+
+          try {
+            File('tool/.trigger_reload').writeAsStringSync('${DateTime.now().toIso8601String()}|$action');
+          } catch (_) {}
+          print('✅ Το patch εφαρμόστηκε. Action: $action. Ο Dev Server ενημερώνεται αυτόματα.');
+        } else {
+          print('⚠️ Αποτυχία εφαρμογής. Ελέγξτε τα αρχεία.');
         }
-
-        try {
-          File('tool/.trigger_reload').writeAsStringSync('${DateTime.now().toIso8601String()}|$action');
-        } catch (_) {}
-        print('✅ Το patch εφαρμόστηκε. Action: $action. Ο Dev Server ενημερώνεται αυτόματα.');
-      } else {
-        print('⚠️ Αποτυχία εφαρμογής. Ελέγξτε τα αρχεία.');
       }
-    }
-  });
+      
+      // Καλούμε τον επόμενο έλεγχο ΜΟΝΟ αφού τελειώσει ο τωρινός (αποτρέπει το μποτιλιάρισμα)
+      scheduleNextCheck();
+    });
+  }
+
+  // Ξεκινάμε την λούπα
+  scheduleNextCheck();
   
   ProcessSignal.sigint.watch().listen((_) {
     exit(0);
@@ -104,11 +106,10 @@ void main() async {
 
 Future<String> getClipboard() async {
   try {
-    // Χρήση triple-quotes r''' για την αποφυγή σφαλμάτων με τις διπλές εισαγωγικές της PowerShell
     final result = await Process.run('powershell', [
       '-NoProfile',
       '-Command',
-      r'''$ErrorActionPreference = 'SilentlyContinue'; $code = '[DllImport("user32.dll")] public static extern uint GetClipboardSequenceNumber();'; $type = Add-Type -MemberDefinition $code -Name 'WinCB' -Namespace 'Win32' -PassThru; $seq = $type::GetClipboardSequenceNumber(); $txt = Get-Clipboard -Raw; if ($txt -eq $null) { $txt = '' }; Write-Output ($seq.ToString() + ':::CLIP_SEQ:::' + $txt)'''
+      'Get-Clipboard -Raw'
     ], stdoutEncoding: utf8, runInShell: true);
     return result.stdout.toString().trim();
   } catch (e) {
