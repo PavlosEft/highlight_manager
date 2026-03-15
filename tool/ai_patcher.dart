@@ -62,41 +62,42 @@ void main() async {
     Timer(const Duration(seconds: 1), () async {
       final rawData = await getClipboard();
 
-      // Ελέγχουμε αν υπάρχει νέο κείμενο και αν περιέχει το HM_PATCH
-      if (rawData.isNotEmpty && rawData != lastClipboardText && rawData.contains('<HM_PATCH>')) {
+      // 1. Ελέγχουμε αν άλλαξε το clipboard και το ανανεώνουμε ΠΑΝΤΑ
+      if (rawData.isNotEmpty && rawData != lastClipboardText) {
         lastClipboardText = rawData;
         
-        print('\n⏳ Εφαρμογή αλλαγών...');
-        bool success = applyPatch(rawData);
-        
-        if (success) {
-          print('✨ [AI PATCHER] Το patch εφαρμόστηκε επιτυχώς! Δημιουργία snapshot...');
+        // 2. ΤΩΡΑ ελέγχουμε αν το νέο κείμενο είναι Patch
+        if (rawData.contains('<HM_PATCH>')) {
+          print('\n⏳ Εφαρμογή αλλαγών...');
+          bool success = applyPatch(rawData);
           
-          await manageZipsBeforePatch();
-          await createCurrentZip(); 
+          if (success) {
+            print('✨ [AI PATCHER] Το patch εφαρμόστηκε επιτυχώς! Δημιουργία snapshot...');
+            
+            await manageZipsBeforePatch();
+            await createCurrentZip(); 
 
-          final actionRegex = RegExp(r'<ACTION>(.*?)</ACTION>', dotAll: true);
-          final actionMatch = actionRegex.firstMatch(rawData);
-          String action = 'RELOAD'; 
-          if (actionMatch != null) {
-            action = actionMatch.group(1)!.trim().toUpperCase();
+            final actionRegex = RegExp(r'<ACTION>(.*?)</ACTION>', dotAll: true);
+            final actionMatch = actionRegex.firstMatch(rawData);
+            String action = 'RELOAD'; 
+            if (actionMatch != null) {
+              action = actionMatch.group(1)!.trim().toUpperCase();
+            }
+
+            try {
+              File('tool/.trigger_reload').writeAsStringSync('${DateTime.now().toIso8601String()}|$action');
+            } catch (_) {}
+            print('✅ Το patch εφαρμόστηκε. Action: $action. Ο Dev Server ενημερώνεται αυτόματα.');
+          } else {
+            print('⚠️ Αποτυχία εφαρμογής. Ελέγξτε τα αρχεία.');
           }
-
-          try {
-            File('tool/.trigger_reload').writeAsStringSync('${DateTime.now().toIso8601String()}|$action');
-          } catch (_) {}
-          print('✅ Το patch εφαρμόστηκε. Action: $action. Ο Dev Server ενημερώνεται αυτόματα.');
-        } else {
-          print('⚠️ Αποτυχία εφαρμογής. Ελέγξτε τα αρχεία.');
         }
       }
       
-      // Καλούμε τον επόμενο έλεγχο ΜΟΝΟ αφού τελειώσει ο τωρινός (αποτρέπει το μποτιλιάρισμα)
       scheduleNextCheck();
     });
   }
 
-  // Ξεκινάμε την λούπα
   scheduleNextCheck();
   
   ProcessSignal.sigint.watch().listen((_) {
