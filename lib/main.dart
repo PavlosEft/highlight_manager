@@ -172,7 +172,7 @@ const Map<String, Map<String, String>> translations = {
     'high_tab': 'Highlights',
   },
   'en': {
-    'title': 'Highlight Manager (Test)',
+    'title': 'Highlight Manager',
     'no_projects': 'No projects yet.\nTap \'+\' to get started!',
     'new_project': 'New Project',
     'cancel': 'Cancel',
