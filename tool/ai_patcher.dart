@@ -17,6 +17,24 @@ void printMenu() {
   print('Περιμένω για αντιγραφή κώδικα (Ctrl+C)...');
 }
 
+void playDetectSound() {
+  if (Platform.isWindows) {
+    Process.run('powershell', ['-c', '[console]::beep(600, 100)']);
+  }
+}
+
+void playSound(bool success) {
+  if (Platform.isWindows) {
+    if (success) {
+      Process.run('powershell', ['-c', '[console]::beep(1000, 150); [console]::beep(1200, 150)']);
+    } else {
+      Process.run('powershell', ['-c', '[console]::beep(300, 500)']);
+    }
+  } else {
+    stdout.write('\x07');
+  }
+}
+
 void main() async {
   printMenu();
   
@@ -62,17 +80,20 @@ void main() async {
     Timer(const Duration(seconds: 1), () async {
       final rawData = await getClipboard();
 
-      // 1. Ελέγχουμε αν άλλαξε το clipboard και το ανανεώνουμε ΠΑΝΤΑ
+      // 1. Ελέγχουμε αν άλλαξε το clipboard
       if (rawData.isNotEmpty && rawData != lastClipboardText) {
         lastClipboardText = rawData;
         
-        // 2. ΤΩΡΑ ελέγχουμε αν το νέο κείμενο είναι Patch
-        if (rawData.contains('<HM_PATCH>')) {
-          print('\n⏳ Εφαρμογή αλλαγών...');
+        // 2. Ελέγχουμε αν είναι Patch ΚΑΙ δεν το έχουμε ήδη τρέξει
+        if (rawData.contains('<HM_PATCH>') && !rawData.contains('//[HM_SEEN]')) {
+          playDetectSound();
+          print('\n⏳ Patch Detected...');
           bool success = applyPatch(rawData);
           
+          playSound(success);
+          
           if (success) {
-            print('✨ [AI PATCHER] Το patch εφαρμόστηκε επιτυχώς! Δημιουργία snapshot...');
+            print('✅ Patch OK! Creating snapshot...');
             
             await manageZipsBeforePatch();
             await createCurrentZip(); 
@@ -87,10 +108,18 @@ void main() async {
             try {
               File('tool/.trigger_reload').writeAsStringSync('${DateTime.now().toIso8601String()}|$action');
             } catch (_) {}
-            print('✅ Το patch εφαρμόστηκε. Action: $action. Ο Dev Server ενημερώνεται αυτόματα.');
+            print('🚀 Action: $action.');
           } else {
-            print('⚠️ Αποτυχία εφαρμογής. Ελέγξτε τα αρχεία.');
+            print('❌ Patch Failed!');
           }
+
+          // Μαρκάρουμε το clipboard ώστε να μην το ξανατρέξει κατά λάθος
+          try {
+            final tempFile = File('tool/.temp_clip.txt');
+            tempFile.writeAsStringSync(rawData + '\n//[HM_SEEN]');
+            await Process.run('powershell', ['-NoProfile', '-Command', 'Get-Content tool/.temp_clip.txt -Raw | Set-Clipboard']);
+            try { tempFile.deleteSync(); } catch (_) {}
+          } catch (_) {}
         }
       }
       
@@ -107,11 +136,13 @@ void main() async {
 
 Future<String> getClipboard() async {
   try {
+    // Αναγκάζουμε το PowerShell να επιστρέψει τα δεδομένα σε UTF-8
     final result = await Process.run('powershell', [
       '-NoProfile',
       '-Command',
-      'Get-Clipboard -Raw'
+      '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-Clipboard -Raw'
     ], stdoutEncoding: utf8, runInShell: true);
+    
     return result.stdout.toString().trim();
   } catch (e) {
     return '';
@@ -137,31 +168,45 @@ bool applyPatch(String rawClipboard) {
 
       if (fileMatch != null && replaceMatch != null && withMatch != null) {
         final filename = fileMatch.group(1)!.trim();
-        final oldCode = replaceMatch.group(1)!;
-        final newCode = withMatch.group(1)!;
+        
+        // ΑΣΦΑΛΗΣ ΚΑΘΑΡΙΣΜΟΣ: Μετατροπή Non-Breaking Spaces (\xA0) σε κανονικά κενά
+        final oldCode = replaceMatch.group(1)!.replaceAll(RegExp(r'\xA0'), ' ');
+        final newCode = withMatch.group(1)!.replaceAll(RegExp(r'\xA0'), ' ');
 
         final file = File(filename);
         if (!file.existsSync()) {
-          print('❌ Σφάλμα: Το αρχείο $filename δεν βρέθηκε. Ακύρωση αλλαγών.');
+          print('❌ Σφάλμα: Δεν βρέθηκε το αρχείο $filename.');
           return false;
         }
 
         if (!fileContents.containsKey(filename)) {
-          fileContents[filename] = file.readAsStringSync().replaceAll('\r\n', '\n');
+          // Διαβάζουμε το αρχείο και καθαρίζουμε κι εδώ τα πιθανά κρυφά κενά
+          fileContents[filename] = file.readAsStringSync()
+              .replaceAll('\r\n', '\n')
+              .replaceAll(RegExp(r'\xA0'), ' ');
           newFileContents[filename] = fileContents[filename]!;
         }
 
+        // 1η Δοκιμή: Απόλυτη ταύτιση
         if (newFileContents[filename]!.contains(oldCode)) {
           newFileContents[filename] = newFileContents[filename]!.replaceFirst(oldCode, newCode);
-        } else {
-          print('❌ Σφάλμα: Δεν βρέθηκε ο κώδικας στο αρχείο $filename.');
-          return false;
+        } 
+        else {
+          // 2η Δοκιμή (Fallback): Αφαίρεση κενών γραμμών μόνο πάνω-κάτω (trim)
+          final trimmedOldCode = oldCode.trim();
+          if (newFileContents[filename]!.contains(trimmedOldCode)) {
+            newFileContents[filename] = newFileContents[filename]!.replaceFirst(trimmedOldCode, newCode.trim());
+          } else {
+            print('❌ Σφάλμα: Δεν βρέθηκε ο κώδικας στο $filename. (Μήπως έχει ήδη αλλαχτεί;)');
+            return false;
+          }
         }
       } else {
           return false;
       }
     }
 
+    // Αποθήκευση μόνο αν όλα τα patches του clipboard πέρασαν επιτυχώς
     newFileContents.forEach((filename, content) {
       File(filename).writeAsStringSync(content);
     });
@@ -169,7 +214,7 @@ bool applyPatch(String rawClipboard) {
     return true;
 
   } catch (e) {
-    print('❌ Απρόσμενο Σφάλμα: $e');
+    print('❌ Απρόσμενο Σφάλμα στο Patcher: $e');
   }
   return false; 
 }
@@ -180,7 +225,6 @@ Future<void> manageZipsBeforePatch() async {
     if (file is File && file.path.contains('SourceCode_') && file.path.endsWith('.zip') && !file.path.contains('(OK)')) {
       final fileName = file.path.split(Platform.pathSeparator).last;
       await file.rename('Backups/$fileName');
-      print('📦 Το παλιό snapshot μεταφέρθηκε στα Backups.');
     }
   }
 }
@@ -198,9 +242,9 @@ Future<void> createCurrentZip() async {
   final result = await Process.run('tar.exe', args, runInShell: true);
   
   if (result.exitCode == 0) {
-    print('✅ Αυτόματο Snapshot δημιουργήθηκε: $zipName');
+    print('📦 Auto-Zip: OK ($zipName)');
   } else {
-    print('❌ Σφάλμα κατά τη δημιουργία ZIP: ${result.stderr}');
+    print('❌ Auto-Zip Failed: ${result.stderr}');
   }
 }
 

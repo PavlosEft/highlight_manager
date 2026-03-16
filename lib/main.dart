@@ -475,6 +475,9 @@ class AppState extends ChangeNotifier {
     final totalStopwatch = Stopwatch()..start();
 
     try {
+      print('\n[ANALYZE] Ξεκινάει η ανάλυση για: $finalName');
+      final stepStopwatch = Stopwatch()..start();
+
       // 1ο Πέρασμα: Υπολογισμός Συνολικής Διάρκειας (Απαραίτητο για το συνολικό ποσοστό % progress)
       for (int i = 0; i < paths.length; i++) {
         if (_isAnalysisCancelled) throw Exception('Cancelled');
@@ -498,8 +501,14 @@ class AppState extends ChangeNotifier {
         videoDurations.add(dur);
       }
 
+      print('[ANALYZE] Υπολογισμός διάρκειας ολοκληρώθηκε σε ${stepStopwatch.elapsedMilliseconds}ms. Συνολική διάρκεια: $totalDur s');
+      stepStopwatch.reset();
+
       // 2ο Πέρασμα: Ανάλυση Ήχου
       for (int i = 0; i < paths.length; i++) {
+        print('[ANALYZE] Ξεκινάει FFmpeg για αρχείο ${i + 1}/${paths.length}...');
+        final fileStopwatch = Stopwatch()..start();
+
         if (_isAnalysisCancelled) throw Exception('Cancelled');
         
         String path = paths[i];
@@ -511,7 +520,7 @@ class AppState extends ChangeNotifier {
         List<double> currentTimes = [];
         double currentTime = 0.0;
         
-        final afFilter = "aformat=channel_layouts=mono,aresample=22050,asetnsamples=512,astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level";
+        final afFilter = "aformat=channel_layouts=mono,aresample=11025,asetnsamples=1024,astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level";
 
         void processRmsLine(String line) {
           if (line.contains('lavfi.astats.Overall.RMS_level=')) {
@@ -521,7 +530,7 @@ class AppState extends ChangeNotifier {
               double linear = db <= -100.0 ? 0.0 : math.pow(10, db / 20.0).toDouble();
               currentRms.add(linear);
               currentTimes.add(currentTime + cumulativeTime);
-              currentTime += (512.0 / 22050.0);
+              currentTime += (1024.0 / 11025.0);
               
               if (currentRms.length % 50 == 0) {
                 double globalProgress = (cumulativeTime + currentTime) / totalDur;
@@ -535,13 +544,14 @@ class AppState extends ChangeNotifier {
           final ffmpegExe = await _getDesktopFFmpegPath();
           final p = await Process.start(
             ffmpegExe,
-            ['-y', '-i', path, '-vn', '-af', afFilter, '-f', 'null', '-'],
+            ['-y', '-threads', '4', '-i', path, '-vn', '-af', afFilter, '-f', 'null', '-'],
           );
           _activeFfmpegProcesses.add(p);
           
           p.stderr.transform(utf8.decoder).transform(const LineSplitter()).listen(processRmsLine);
           
           final exitCode = await p.exitCode;
+          print('[ANALYZE] Desktop FFmpeg ολοκληρώθηκε σε ${fileStopwatch.elapsedMilliseconds}ms (Exit: $exitCode)');
           if (exitCode != 0 && !_isAnalysisCancelled) throw Exception('FFmpeg failed');
           if (_isAnalysisCancelled) throw Exception('Cancelled');
         } else {
@@ -553,13 +563,14 @@ class AppState extends ChangeNotifier {
              } catch (_) {}
           }
 
-          final cmd = "-y -i \"$ffmpegPath\" -vn -af \"$afFilter\" -f null -";
+          final cmd = "-y -threads 4 -i \"$ffmpegPath\" -vn -af \"$afFilter\" -f null -";
           
           final completer = Completer<void>();
           FFmpegKit.executeAsync(
             cmd,
             (session) async {
               final returnCode = await session.getReturnCode();
+              print('[ANALYZE] Mobile FFmpeg ολοκληρώθηκε σε ${fileStopwatch.elapsedMilliseconds}ms (Return Code: $returnCode)');
               if (ReturnCode.isCancel(returnCode) || _isAnalysisCancelled) {
                 completer.completeError(Exception('Cancelled'));
               } else {
@@ -600,6 +611,7 @@ class AppState extends ChangeNotifier {
 
       if (_isAnalysisCancelled) throw Exception('Cancelled');
 
+      print('[ANALYZE] Συνολική Ανάλυση Ήχου ολοκληρώθηκε σε ${stepStopwatch.elapsedMilliseconds}ms');
       onStatusUpdate("Αποθήκευση δεδομένων...", 1.0);
       
       double sumRms = 0.0;
@@ -631,9 +643,11 @@ class AppState extends ChangeNotifier {
       );
 
       await saveProject(newProject);
+      print('[ANALYZE] ΟΛΟΚΛΗΡΟ ΤΟ PROJECT ΔΗΜΙΟΥΡΓΗΘΗΚΕ ΣΕ: ${totalStopwatch.elapsed.inSeconds} δευτερόλεπτα.');
       return newProject;
 
     } catch (e) {
+      print('[ANALYZE] ΣΦΑΛΜΑ κατά την ανάλυση: $e');
       if (await projectDir.exists()) {
         await projectDir.delete(recursive: true);
       }
@@ -1299,9 +1313,9 @@ class HomeScreen extends StatelessWidget {
                   alignment: Alignment.center,
                   children: [
                     Icon(
-                      Icons.movie_creation_outlined, 
-                      size: 32, 
-                      color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.5)
+                      Icons.movie_filter_rounded, 
+                      size: 42, 
+                      color: Theme.of(context).colorScheme.tertiary
                     ),
                     Positioned(
                       bottom: 4,
@@ -1482,10 +1496,11 @@ class HomeScreen extends StatelessWidget {
                     height: isDesktop ? 56 : 48,
                     child: FilledButton.icon(
                     onPressed: () => _showCreateProjectDialog(context, state),
-                    icon: const Icon(Icons.add_circle_outline, size: 28),
-                    label: Text(state.t('new_project'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                    icon: const Icon(Icons.add_to_photos_rounded, size: 28),
+                    label: Text(state.t('new_project'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, letterSpacing: 0.5)),
                     style: FilledButton.styleFrom(
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(32)),
+                      elevation: 4,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                     ),
                   ),
                 ),
