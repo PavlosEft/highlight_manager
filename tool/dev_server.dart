@@ -39,7 +39,14 @@ void main() async {
 
   String targetDevice = await detectDevice();
 
-  if (targetDevice != 'windows') {
+  bool forceBuild = false;
+  final forceBuildFile = File('tool/.force_build');
+  if (forceBuildFile.existsSync()) {
+    forceBuild = true;
+    try { forceBuildFile.deleteSync(); } catch (_) {}
+  }
+
+  if (targetDevice != 'windows' && !forceBuild) {
     print('📱 Βρέθηκε Android. Εκκίνηση εφαρμογής και σύνδεση στο παρασκήνιο...');
     await Process.run('adb', ['-s', targetDevice, 'forward', '--remove-all'], runInShell: true);
     await Process.run('adb', ['-s', targetDevice, 'shell', 'am', 'start', '-n', 'com.example.highlight_manager/.MainActivity'], runInShell: true);
@@ -49,6 +56,7 @@ void main() async {
     // Μία και μοναδική προσπάθεια (Τυφλή εμπιστοσύνη)
     startBlindAttach(targetDevice);
   } else {
+    if (forceBuild) print('🏗️ Εντοπίστηκε πρόσφατος καθαρισμός. Αναγκαστικό πλήρες Build...');
     await startFlutterApp();
   }
 
@@ -71,18 +79,10 @@ void main() async {
       printMenu();
     } else if (input == 'x') {
       isQuitting = true;
-      print('\n🧹 Τερματισμός & καθαρισμός (flutter clean)...');
+      print('\n🧹 Εκκίνηση εξωτερικού καθαρισμού... Ο Server θα τερματιστεί.');
       for (var p in flutterProcesses) p.kill();
-      Process.runSync('cmd', ['/c', 'cd android && gradlew.bat --stop'], runInShell: true);
       
-      try {
-        final buildDir = Directory('build');
-        if (buildDir.existsSync()) buildDir.deleteSync(recursive: true);
-      } catch (_) {}
-
-      Process.runSync('flutter', ['clean'], runInShell: true);
-      Process.runSync('flutter', ['pub', 'get'], runInShell: true);
-      print('✅ Ολοκληρώθηκε! Τρέξε ξανά το start_dev.bat');
+      Process.run('cmd', ['/c', 'start', 'clean_workspace.bat'], runInShell: true);
       exit(0);
     } else if (input == 'a') {
       if (targetDevice != 'windows') {
@@ -183,6 +183,10 @@ void startBlindAttach(String device) async {
     }
     if (line.contains('Performing hot') || line.contains('Reloaded') || line.contains('Restarted')) {
       stdout.writeln('[system] $line');
+    } else if (line.contains('[ANALYZE]') || line.contains('[USER ACTION]')) {
+      stdout.writeln('\n👉 [ΕΦΑΡΜΟΓΗ]: $line');
+    } else if (line.contains('flutter:')) {
+      stdout.writeln('[app] ${line.split('flutter:').last.trim()}');
     }
   });
 
