@@ -472,6 +472,7 @@ class AppState extends ChangeNotifier {
     List<double> allTimes = [];
     double cumulativeTime = 0.0;
     
+    int totalLines = 0;
     final totalStopwatch = Stopwatch()..start();
 
     try {
@@ -523,6 +524,7 @@ class AppState extends ChangeNotifier {
         final afFilter = "aformat=channel_layouts=mono,aresample=11025,asetnsamples=1024,astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level";
 
         void processRmsLine(String line) {
+          totalLines++;
           if (line.contains('lavfi.astats.Overall.RMS_level=')) {
             final strVal = line.split('=').last.trim();
             double? db = strVal == '-inf' ? -100.0 : double.tryParse(strVal);
@@ -612,7 +614,9 @@ class AppState extends ChangeNotifier {
       if (_isAnalysisCancelled) throw Exception('Cancelled');
 
       print('[ANALYZE] Συνολική Ανάλυση Ήχου ολοκληρώθηκε σε ${stepStopwatch.elapsedMilliseconds}ms');
+      print('[TELEMETRY] Συνολικές γραμμές logs που επεξεργάστηκαν: $totalLines');
       onStatusUpdate("Αποθήκευση δεδομένων...", 1.0);
+      stepStopwatch.reset();
       
       double sumRms = 0.0;
       for (double r in allRms) {
@@ -633,6 +637,45 @@ class AppState extends ChangeNotifier {
         'rms': allRms,
       };
       await analysisFile.writeAsString(jsonEncode(analysisData));
+      print('[TELEMETRY] Χρόνος εγγραφής JSON στο δίσκο: ${stepStopwatch.elapsedMilliseconds}ms');
+
+      // Υπολογισμός στόχου φάσεων: 250 φάσεις ανά 100 λεπτά (ή 2.5 φάσεις / λεπτό)
+      double targetPhases = (totalDur / 60.0) * 2.5;
+      if (targetPhases < 1) targetPhases = 1;
+      
+      double bestSensitivity = 55.0;
+      double lowS = 1.0;
+      double highS = 99.0;
+      int bestCountDiff = 999999;
+      
+      // Αλγόριθμος εύρεσης ιδανικής ευαισθησίας (Binary Search)
+      for (int iter = 0; iter < 12; iter++) {
+        double midS = (lowS + highS) / 2;
+        double level = maxRms - (midS / 100.0) * (maxRms - avgRms);
+        int count = 0;
+        double lastT = -999.0;
+        
+        for (int i = 0; i < allRms.length; i++) {
+          if (allRms[i] > level) {
+            if (allTimes[i] - lastT > 2.0) { // Default grouping test
+              count++;
+              lastT = allTimes[i];
+            }
+          }
+        }
+        
+        int diff = (count - targetPhases).abs().toInt();
+        if (diff < bestCountDiff) {
+          bestCountDiff = diff;
+          bestSensitivity = midS;
+        }
+        
+        if (count > targetPhases) {
+          highS = midS; // Έχουμε πολλές φάσεις -> ρίχνουμε το sensitivity
+        } else {
+          lowS = midS;  // Έχουμε λίγες φάσεις -> ανεβάζουμε το sensitivity
+        }
+      }
 
       final newProject = Project(
         id: projectId,
@@ -640,9 +683,11 @@ class AppState extends ChangeNotifier {
         videoPaths: paths,
         videoDurations: videoDurations,
         totalDuration: totalDur,
+        sensitivity: bestSensitivity,
       );
 
       await saveProject(newProject);
+      print('[ANALYZE] Δυναμική Ευαισθησία ρυθμίστηκε στο: ${bestSensitivity.toStringAsFixed(1)} (Στόχος φάσεων: ${targetPhases.toInt()})');
       print('[ANALYZE] ΟΛΟΚΛΗΡΟ ΤΟ PROJECT ΔΗΜΙΟΥΡΓΗΘΗΚΕ ΣΕ: ${totalStopwatch.elapsed.inSeconds} δευτερόλεπτα.');
       return newProject;
 
@@ -886,7 +931,7 @@ class _ProcessingDialogState extends State<ProcessingDialog> {
       }
     );
     if (mounted) {
-      Navigator.pop(context, project != null);
+      Navigator.pop(context, project);
     }
   }
 
@@ -1053,7 +1098,7 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
       if (proceed != true) return;
     }
 
-    bool success = await showDialog(
+    Project? resultProject = await showDialog<Project?>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => ProcessingDialog(
@@ -1061,10 +1106,16 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
         baseName: name,
         paths: _selectedPaths,
       ),
-    ) ?? false;
+    );
 
-    if (mounted && success) {
+    if (mounted && resultProject != null) {
       Navigator.pop(context);
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => EditorScreen(project: resultProject),
+        ),
+      );
     }
   }
 
@@ -1798,7 +1849,7 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
           if (isImage) trArgs.addAll(['-loop', '1']);
           trArgs.addAll([
             '-i', transPath,
-            '-vf', 'scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2',
+            '-vf', 'scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080',
             '-t', transDur.toString(),
             ...videoParams, '-c:a', 'aac', '-f', 'mp4', transTemp
           ]);
@@ -1930,6 +1981,7 @@ class _EditorScreenState extends State<EditorScreen> {
   bool isTrackingPhase = false;
   bool isAutoplaySuspended = false;
   bool isSeeking = false;
+  bool isFullscreen = false;
   
   List<HighlightPhase> historyStack = [];
   List<HighlightPhase> forwardStack = [];
@@ -2194,16 +2246,12 @@ class _EditorScreenState extends State<EditorScreen> {
       final int index = phases.indexOf(currentPlayingPhase!);
       if (index < 0) return;
       
-      // Το πραγματικό ύψος κάθε στοιχείου μετά τη συμπίεση
-      const double itemHeight = 52.0; 
+      // Σταθερό ύψος του Card (περίπου 56 pixels με τα margins/borders)
+      const double itemHeight = 56.0; 
       final double viewportHeight = _listScrollController.position.viewportDimension;
       
-      // Στοχεύουμε στο κέντρο της οθόνης
       double targetOffset = (index * itemHeight) - (viewportHeight / 2) + (itemHeight / 2);
-      
       targetOffset = math.max(0.0, targetOffset);
-      // Αφαιρέθηκε ο αυστηρός περιορισμός maxScrollExtent, 
-      // γιατί κατά το build δεν έχει προλάβει πάντα να ενημερωθεί σωστά το μέγεθος.
       
       _listScrollController.animateTo(
         targetOffset,
@@ -2249,6 +2297,10 @@ class _EditorScreenState extends State<EditorScreen> {
 
   @override
   void dispose() {
+    if (isFullscreen) {
+      SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    }
     _seekTimer?.cancel();
     playingSub?.cancel();
     durationSub?.cancel();
@@ -2496,10 +2548,7 @@ class _EditorScreenState extends State<EditorScreen> {
     final posDuration = Duration(milliseconds: (globalPositionSeconds * 1000).toInt());
     final totalDur = Duration(milliseconds: (widget.project.totalDuration * 1000).toInt());
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        GestureDetector(
+    Widget videoContainer = GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTapUp: (details) {
             final width = MediaQuery.of(context).size.width;
@@ -2533,29 +2582,189 @@ class _EditorScreenState extends State<EditorScreen> {
             child: Stack(
               alignment: Alignment.center,
               children: [
-                AspectRatio(
-                  aspectRatio: 16 / 9,
-                  child: Video(
+                if (isFullscreen)
+                  Video(
                     controller: controller,
                     controls: NoVideoControls,
+                  )
+                else
+                  AspectRatio(
+                    aspectRatio: 16 / 9,
+                    child: Video(
+                      controller: controller,
+                      controls: NoVideoControls,
+                    ),
+                  ),
+                Positioned(
+                  top: 12,
+                  left: 12,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (isFullscreen) ...[
+                        IconButton(
+                          icon: const Icon(Icons.settings, color: Colors.white, size: 24, shadows: [Shadow(offset: Offset(-1, -1), color: Colors.black), Shadow(offset: Offset(1, -1), color: Colors.black), Shadow(offset: Offset(1, 1), color: Colors.black), Shadow(offset: Offset(-1, 1), color: Colors.black)]),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          onPressed: () => _showSettingsSheet(context, Provider.of<AppState>(context, listen: false)),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      Text(
+                        isFullscreen 
+                          ? '${activePhaseIndex >= 0 ? activePhaseIndex + 1 : 0} / ${widget.project.phases.length}'
+                          : 'Φάση: ${activePhaseIndex >= 0 ? activePhaseIndex + 1 : 0} / ${widget.project.phases.length}',
+                        style: TextStyle(
+                          fontSize: isFullscreen ? 12 : 14,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          shadows: const [
+                            Shadow(offset: Offset(-1, -1), color: Colors.black),
+                            Shadow(offset: Offset(1, -1), color: Colors.black),
+                            Shadow(offset: Offset(1, 1), color: Colors.black),
+                            Shadow(offset: Offset(-1, 1), color: Colors.black),
+                            Shadow(blurRadius: 4, color: Colors.black),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 Positioned(
-                  bottom: 8,
-                  right: 8,
-                  child: Text(
-                    '${_formatDuration(posDuration)} / ${_formatDuration(totalDur)}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                      shadows: [
-                        Shadow(offset: Offset(1, 1), blurRadius: 2, color: Colors.black),
-                        Shadow(offset: Offset(-1, -1), blurRadius: 2, color: Colors.black),
-                      ],
-                    ),
+                  bottom: isFullscreen ? 24 : 8,
+                  left: 12,
+                  child: StreamBuilder<double>(
+                    stream: player.stream.volume,
+                    initialData: player.state.volume,
+                    builder: (context, snapshot) {
+                      final vol = snapshot.data ?? 100.0;
+                      return Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: Icon(vol == 0 ? Icons.volume_off : Icons.volume_up, color: Colors.white, size: 24, shadows: const [Shadow(offset: Offset(-1, -1), color: Colors.black), Shadow(offset: Offset(1, -1), color: Colors.black), Shadow(offset: Offset(1, 1), color: Colors.black), Shadow(offset: Offset(-1, 1), color: Colors.black)]),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            onPressed: () => player.setVolume(vol == 0 ? 100.0 : 0.0),
+                          ),
+                          SizedBox(
+                            width: 100,
+                            child: SliderTheme(
+                              data: SliderTheme.of(context).copyWith(
+                                trackHeight: 3.0,
+                                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6.0),
+                                overlayShape: const RoundSliderOverlayShape(overlayRadius: 12.0),
+                                activeTrackColor: Colors.white,
+                                inactiveTrackColor: Colors.white38,
+                                thumbColor: Colors.white,
+                              ),
+                              child: Slider(
+                                value: vol.clamp(0.0, 100.0),
+                                max: 100.0,
+                                onChanged: (v) => player.setVolume(v),
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    }
                   ),
                 ),
+                Positioned(
+                  bottom: isFullscreen ? 24 : 8,
+                  right: 12,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '${_formatDuration(posDuration)} / ${_formatDuration(totalDur)}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          shadows: [
+                            Shadow(offset: Offset(-1, -1), color: Colors.black),
+                            Shadow(offset: Offset(1, -1), color: Colors.black),
+                            Shadow(offset: Offset(1, 1), color: Colors.black),
+                            Shadow(offset: Offset(-1, 1), color: Colors.black),
+                            Shadow(blurRadius: 4, color: Colors.black),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: Icon(isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen, color: Colors.white, size: 28, shadows: const [Shadow(offset: Offset(-1, -1), color: Colors.black), Shadow(offset: Offset(1, -1), color: Colors.black), Shadow(offset: Offset(1, 1), color: Colors.black), Shadow(offset: Offset(-1, 1), color: Colors.black)]),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        onPressed: () {
+                          setState(() {
+                            isFullscreen = !isFullscreen;
+                          });
+                          if (isFullscreen) {
+                            SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeRight, DeviceOrientation.landscapeLeft]);
+                            SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+                          } else {
+                            SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+                            SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                if (isFullscreen)
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    child: SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        trackHeight: 6.0,
+                        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8.0),
+                        overlayShape: const RoundSliderOverlayShape(overlayRadius: 16.0),
+                        trackShape: const RectangularSliderTrackShape(),
+                        activeTrackColor: Theme.of(context).colorScheme.primary,
+                        inactiveTrackColor: Colors.white38,
+                        thumbColor: Theme.of(context).colorScheme.primary,
+                      ),
+                      child: Slider(
+                        value: globalPositionSeconds.clamp(0.0, widget.project.totalDuration > 0 ? widget.project.totalDuration : 1.0),
+                        max: widget.project.totalDuration > 0 ? widget.project.totalDuration : 1.0,
+                        onChangeStart: (v) {
+                          setState(() {
+                            isTrackingPhase = false;
+                            isAutoplaySuspended = true;
+                          });
+                        },
+                        onChanged: (v) {
+                          setState(() {
+                            globalPositionSeconds = v;
+                            isTrackingPhase = false;
+                            isAutoplaySuspended = true;
+                          });
+                          double accumulated = 0.0;
+                          for (int i = 0; i < widget.project.videoDurations.length; i++) {
+                            double dur = widget.project.videoDurations[i];
+                            if (v <= accumulated + dur || i == widget.project.videoDurations.length - 1) {
+                              if (player.state.playlist.index == i) {
+                                double localSeconds = v - accumulated;
+                                player.seek(Duration(milliseconds: (math.max(0.0, localSeconds) * 1000).toInt()));
+                              }
+                              break;
+                            }
+                            accumulated += dur;
+                          }
+                        },
+                        onChangeEnd: (v) {
+                          setState(() {
+                            isTrackingPhase = false;
+                            isAutoplaySuspended = true;
+                          });
+                          _seekGlobal(v).then((_) => player.play());
+                        },
+                      ),
+                    ),
+                  ),
                 if (_showStarFeedback)
                   TweenAnimationBuilder<double>(
                     tween: Tween<double>(begin: 0.5, end: 1.5),
@@ -2574,7 +2783,21 @@ class _EditorScreenState extends State<EditorScreen> {
               ],
             ),
           ),
-        ),
+        );
+
+    if (isFullscreen) {
+      return Container(
+        color: Colors.black,
+        width: double.infinity,
+        height: double.infinity,
+        child: SafeArea(child: videoContainer),
+      );
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        videoContainer,
         // Γραμμή 1: Slider
         SizedBox(
           height: 12,
@@ -2884,6 +3107,24 @@ class _EditorScreenState extends State<EditorScreen> {
                       Icon(Icons.movie_creation_outlined, size: 16, color: showHighlightsOnly ? Theme.of(context).colorScheme.primary : Colors.grey),
                     ],
                   ),
+                ),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black87,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: RichText(
+                  text: TextSpan(
+                    style: const TextStyle(fontSize: 15),
+                    children: [
+                      TextSpan(text: '${activePhaseIndex >= 0 ? activePhaseIndex + 1 : 0} ', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      const TextSpan(text: '/ ', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      TextSpan(text: '${widget.project.phases.length}', style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                    ]
+                  )
                 ),
               ),
               const Spacer(),
@@ -3228,6 +3469,17 @@ class _EditorScreenState extends State<EditorScreen> {
     final iconSize = isDesktop ? 28.0 : 24.0;
     final topActionFontSize = isDesktop ? 18.0 : 15.0;
     final horizontalPadding = isDesktop ? 16.0 : 8.0;
+
+    if (isFullscreen) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: SafeArea(
+          child: Center(
+            child: _buildMobileVideoPlayer(context),
+          ),
+        ),
+      );
+    }
     
     return Scaffold(
       appBar: AppBar(
