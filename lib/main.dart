@@ -2667,8 +2667,8 @@ class _EditorScreenState extends State<EditorScreen> {
                     ),
                   ),
                 Positioned(
-                  top: isFullscreen ? 8 : 8,
-                  left: isFullscreen ? 8 : 8,
+                  top: isFullscreen ? 16 : 4,
+                  left: isFullscreen ? 8 : 4,
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
@@ -2689,8 +2689,8 @@ class _EditorScreenState extends State<EditorScreen> {
                         ],
                         Text(
                           '${activePhaseIndex >= 0 ? activePhaseIndex + 1 : 0} / ${widget.project.phases.length}',
-                          style: const TextStyle(
-                            fontSize: 14,
+                          style: TextStyle(
+                            fontSize: isFullscreen ? 14 : 12,
                             fontWeight: FontWeight.bold,
                             color: Colors.white70,
                           ),
@@ -2700,8 +2700,8 @@ class _EditorScreenState extends State<EditorScreen> {
                   ),
                 ),
                 Positioned(
-                  bottom: isFullscreen ? 8 : 0,
-                  left: isFullscreen ? 12 : 0,
+                  bottom: isFullscreen ? 32 : 0,
+                  left: isFullscreen ? 16 : 0,
                   child: StreamBuilder<double>(
                     stream: player.stream.volume,
                     initialData: player.state.volume,
@@ -2743,8 +2743,8 @@ class _EditorScreenState extends State<EditorScreen> {
                   ),
                 ),
                 Positioned(
-                  bottom: isFullscreen ? 8 : 4,
-                  right: isFullscreen ? 8 : 8,
+                  bottom: isFullscreen ? 20 : 4,
+                  right: isFullscreen ? 16 : 8,
                   child: Text(
                     '${_formatDuration(posDuration)} / ${_formatDuration(totalDur)}',
                     style: TextStyle(
@@ -2762,8 +2762,8 @@ class _EditorScreenState extends State<EditorScreen> {
                   ),
                 ),
                 Positioned(
-                  bottom: isFullscreen ? 8 : 28,
-                  right: isFullscreen ? 100 : 2,
+                  bottom: isFullscreen ? 44 : 22,
+                  right: isFullscreen ? 16 : 2,
                   child: IconButton(
                     icon: Icon(isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen, color: Colors.grey.shade400, size: 28, shadows: const [Shadow(offset: Offset(-1, -1), color: Colors.black), Shadow(offset: Offset(1, -1), color: Colors.black), Shadow(offset: Offset(1, 1), color: Colors.black), Shadow(offset: Offset(-1, 1), color: Colors.black)]),
                     padding: EdgeInsets.zero,
@@ -3190,7 +3190,7 @@ class _EditorScreenState extends State<EditorScreen> {
                   text: TextSpan(
                     style: const TextStyle(fontSize: 18),
                     children: [
-                      TextSpan(text: '${activePhaseIndex >= 0 ? activePhaseIndex + 1 : 0} ', style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
+                      TextSpan(text: '${activePhaseIndex >= 0 ? activePhaseIndex + 1 : 0} ', style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.normal)),
                       const TextSpan(text: '/ ', style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
                       TextSpan(text: '${widget.project.phases.length}', style: const TextStyle(color: Color(0xFF900020), fontWeight: FontWeight.bold)),
                     ]
