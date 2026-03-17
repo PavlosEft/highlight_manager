@@ -1385,7 +1385,7 @@ class HomeScreen extends StatelessWidget {
           );
         },
         child: Padding(
-          padding: const EdgeInsets.all(12.0),
+          padding: const EdgeInsets.all(8.0),
           child: Row(
             children: [
               // Πλαίσιο Thumbnail (4-πλό κολάζ)
@@ -1440,17 +1440,33 @@ class HomeScreen extends StatelessWidget {
                     Text(project.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), maxLines: 1, overflow: TextOverflow.ellipsis),
                     const SizedBox(height: 6),
                     Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(Icons.movie_creation_outlined, size: 14, color: Colors.grey),
-                        const SizedBox(width: 4),
-                        Text('(${project.videoPaths.length})', style: const TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)),
-                        const SizedBox(width: 12),
-                        const Icon(Icons.access_time, size: 14, color: Colors.grey),
-                        const SizedBox(width: 4),
-                        Text(formatDuration(project.totalDuration), style: const TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)),
-                        const SizedBox(width: 8),
-                        Expanded(child: Text('${project.createdAt.day}/${project.createdAt.month}/${project.createdAt.year}', textAlign: TextAlign.right, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.grey, fontSize: 11))),
-                      ]
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.movie_creation_outlined, size: 16, color: Colors.grey),
+                            const SizedBox(width: 4),
+                            Text('(${project.videoPaths.length})', style: const TextStyle(color: Colors.grey, fontSize: 14, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.access_time, size: 16, color: Colors.grey),
+                                const SizedBox(width: 4),
+                                Text(formatDuration(project.totalDuration), style: const TextStyle(color: Colors.grey, fontSize: 14, fontWeight: FontWeight.bold)),
+                              ],
+                            ),
+                            const SizedBox(height: 2),
+                            Text('${project.createdAt.day}/${project.createdAt.month}/${project.createdAt.year}', style: const TextStyle(color: Colors.grey, fontSize: 13)),
+                          ],
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -2651,41 +2667,41 @@ class _EditorScreenState extends State<EditorScreen> {
                     ),
                   ),
                 Positioned(
-                  top: 4,
-                  left: 4,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (isFullscreen) ...[
-                        IconButton(
-                          icon: Icon(Icons.settings, color: Colors.grey.shade300, size: 24, shadows: const [Shadow(offset: Offset(-1, -1), color: Colors.black), Shadow(offset: Offset(1, -1), color: Colors.black), Shadow(offset: Offset(1, 1), color: Colors.black), Shadow(offset: Offset(-1, 1), color: Colors.black)]),
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                          onPressed: () => _showSettingsSheet(context, Provider.of<AppState>(context, listen: false)),
+                  top: isFullscreen ? 8 : 8,
+                  left: isFullscreen ? 8 : 8,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (isFullscreen) ...[
+                          IconButton(
+                            icon: const Icon(Icons.settings, color: Colors.white70, size: 24),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            onPressed: () => _showSettingsSheet(context, Provider.of<AppState>(context, listen: false)),
+                          ),
+                          const SizedBox(width: 4),
+                        ],
+                        Text(
+                          '${activePhaseIndex >= 0 ? activePhaseIndex + 1 : 0} / ${widget.project.phases.length}',
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white70,
+                          ),
                         ),
-                        const SizedBox(width: 8),
                       ],
-                      Text(
-                        '${activePhaseIndex >= 0 ? activePhaseIndex + 1 : 0} / ${widget.project.phases.length}',
-                        style: TextStyle(
-                          fontSize: isFullscreen ? 12 : 14,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.grey.shade300,
-                          shadows: const [
-                            Shadow(offset: Offset(-1, -1), color: Colors.black),
-                            Shadow(offset: Offset(1, -1), color: Colors.black),
-                            Shadow(offset: Offset(1, 1), color: Colors.black),
-                            Shadow(offset: Offset(-1, 1), color: Colors.black),
-                            Shadow(blurRadius: 4, color: Colors.black),
-                          ],
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
                 Positioned(
-                  bottom: 4,
-                  left: 4,
+                  bottom: isFullscreen ? 8 : 0,
+                  left: isFullscreen ? 12 : 0,
                   child: StreamBuilder<double>(
                     stream: player.stream.volume,
                     initialData: player.state.volume,
@@ -2695,17 +2711,17 @@ class _EditorScreenState extends State<EditorScreen> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           SizedBox(
-                            height: 70,
+                            height: isFullscreen ? 130 : 80,
                             child: RotatedBox(
                               quarterTurns: 3,
                               child: SliderTheme(
                                 data: SliderTheme.of(context).copyWith(
-                                  trackHeight: 3.0,
+                                  trackHeight: 1.5,
                                   thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6.0),
                                   overlayShape: const RoundSliderOverlayShape(overlayRadius: 12.0),
-                                  activeTrackColor: Colors.grey.shade300,
-                                  inactiveTrackColor: Colors.grey.shade600,
-                                  thumbColor: Colors.grey.shade300,
+                                  activeTrackColor: Colors.grey.shade400,
+                                  inactiveTrackColor: Colors.grey.shade700,
+                                  thumbColor: Colors.grey.shade400,
                                 ),
                                 child: Slider(
                                   value: vol.clamp(0.0, 100.0),
@@ -2716,7 +2732,7 @@ class _EditorScreenState extends State<EditorScreen> {
                             ),
                           ),
                           IconButton(
-                            icon: Icon(vol == 0 ? Icons.volume_off : Icons.volume_up, color: Colors.grey.shade300, size: 24, shadows: const [Shadow(offset: Offset(-1, -1), color: Colors.black), Shadow(offset: Offset(1, -1), color: Colors.black), Shadow(offset: Offset(1, 1), color: Colors.black), Shadow(offset: Offset(-1, 1), color: Colors.black)]),
+                            icon: Icon(vol == 0 ? Icons.volume_off : Icons.volume_up, color: Colors.grey.shade400, size: 24, shadows: const [Shadow(offset: Offset(-1, -1), color: Colors.black), Shadow(offset: Offset(1, -1), color: Colors.black), Shadow(offset: Offset(1, 1), color: Colors.black), Shadow(offset: Offset(-1, 1), color: Colors.black)]),
                             padding: EdgeInsets.zero,
                             constraints: const BoxConstraints(),
                             onPressed: () => player.setVolume(vol == 0 ? 100.0 : 0.0),
@@ -2727,45 +2743,43 @@ class _EditorScreenState extends State<EditorScreen> {
                   ),
                 ),
                 Positioned(
-                  bottom: 4,
-                  right: 4,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '${_formatDuration(posDuration)} / ${_formatDuration(totalDur)}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.grey.shade300,
-                          shadows: const [
-                            Shadow(offset: Offset(-1, -1), color: Colors.black),
-                            Shadow(offset: Offset(1, -1), color: Colors.black),
-                            Shadow(offset: Offset(1, 1), color: Colors.black),
-                            Shadow(offset: Offset(-1, 1), color: Colors.black),
-                            Shadow(blurRadius: 4, color: Colors.black),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      IconButton(
-                        icon: Icon(isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen, color: Colors.grey.shade300, size: 28, shadows: const [Shadow(offset: Offset(-1, -1), color: Colors.black), Shadow(offset: Offset(1, -1), color: Colors.black), Shadow(offset: Offset(1, 1), color: Colors.black), Shadow(offset: Offset(-1, 1), color: Colors.black)]),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                        onPressed: () {
-                          setState(() {
-                            isFullscreen = !isFullscreen;
-                          });
-                          if (isFullscreen) {
-                            SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeRight, DeviceOrientation.landscapeLeft]);
-                            SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-                          } else {
-                            SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-                            SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-                          }
-                        },
-                      ),
-                    ],
+                  bottom: isFullscreen ? 8 : 4,
+                  right: isFullscreen ? 8 : 8,
+                  child: Text(
+                    '${_formatDuration(posDuration)} / ${_formatDuration(totalDur)}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey.shade400,
+                      shadows: const [
+                        Shadow(offset: Offset(-1, -1), color: Colors.black),
+                        Shadow(offset: Offset(1, -1), color: Colors.black),
+                        Shadow(offset: Offset(1, 1), color: Colors.black),
+                        Shadow(offset: Offset(-1, 1), color: Colors.black),
+                        Shadow(blurRadius: 4, color: Colors.black),
+                      ],
+                    ),
+                  ),
+                ),
+                Positioned(
+                  bottom: isFullscreen ? 8 : 28,
+                  right: isFullscreen ? 100 : 2,
+                  child: IconButton(
+                    icon: Icon(isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen, color: Colors.grey.shade400, size: 28, shadows: const [Shadow(offset: Offset(-1, -1), color: Colors.black), Shadow(offset: Offset(1, -1), color: Colors.black), Shadow(offset: Offset(1, 1), color: Colors.black), Shadow(offset: Offset(-1, 1), color: Colors.black)]),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    onPressed: () {
+                      setState(() {
+                        isFullscreen = !isFullscreen;
+                      });
+                      if (isFullscreen) {
+                        SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeRight, DeviceOrientation.landscapeLeft]);
+                        SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+                      } else {
+                        SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+                        SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+                      }
+                    },
                   ),
                 ),
                 if (isFullscreen)
@@ -3167,14 +3181,14 @@ class _EditorScreenState extends State<EditorScreen> {
               ),
               const Spacer(),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
                 decoration: BoxDecoration(
                   color: Theme.of(context).colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: RichText(
                   text: TextSpan(
-                    style: const TextStyle(fontSize: 15),
+                    style: const TextStyle(fontSize: 18),
                     children: [
                       TextSpan(text: '${activePhaseIndex >= 0 ? activePhaseIndex + 1 : 0} ', style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
                       const TextSpan(text: '/ ', style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
@@ -3259,10 +3273,8 @@ class _EditorScreenState extends State<EditorScreen> {
                     final isLastPlayed = (currentPlayingPhase == phase && !isTrackingPhase);
                     
                     Color bgColor;
-                    if (isActive) {
-                      bgColor = isDark ? const Color(0xFF7F1D1D) : const Color(0xFFFFE4E6);
-                    } else if (isLastPlayed) {
-                      bgColor = isDark ? const Color(0xFF78350F) : const Color(0xFFFEF3C7);
+                    if (isActive || isLastPlayed) {
+                      bgColor = isDark ? const Color(0xFF3F1018) : const Color(0xFFFCE8EB);
                     } else if (phase.isHighlight) {
                       bgColor = isDark ? const Color(0xFF4A148C) : const Color(0xFFF3E5F5);
                     } else {
@@ -3270,10 +3282,8 @@ class _EditorScreenState extends State<EditorScreen> {
                     }
 
                     Color borderColor;
-                    if (isActive) {
-                      borderColor = isDark ? const Color(0xFFFCA5A5) : const Color(0xFFEF4444);
-                    } else if (isLastPlayed) {
-                      borderColor = isDark ? const Color(0xFFFBBF24) : const Color(0xFFF59E0B);
+                    if (isActive || isLastPlayed) {
+                      borderColor = const Color(0xFF900020);
                     } else if (phase.isHighlight) {
                       borderColor = Theme.of(context).colorScheme.primary;
                     } else {
@@ -3357,16 +3367,21 @@ class _EditorScreenState extends State<EditorScreen> {
                                   ),
                                 ),
                                 const SizedBox(width: 12),
-                                Text(
-                                  '(${chronologicalPhases.indexOf(phase) + 1}) $m:$s', 
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: (isActive || isLastPlayed) ? FontWeight.bold : FontWeight.normal, 
-                                    decoration: phase.isSeen && !isActive && !isLastPlayed ? TextDecoration.lineThrough : null,
-                                    color: (isActive || isLastPlayed) 
-                                      ? (isActive ? (isDark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C)) : (isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706)))
-                                      : (phase.isSeen ? Colors.grey : null)
-                                  )
+                                Container(
+                                  padding: isActive ? const EdgeInsets.symmetric(horizontal: 4, vertical: 2) : null,
+                                  decoration: isActive ? BoxDecoration(
+                                    border: Border.all(color: const Color(0xFF900020), width: 1.0),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ) : null,
+                                  child: Text(
+                                    '(${chronologicalPhases.indexOf(phase) + 1}) $m:$s', 
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: (isActive || isLastPlayed) ? FontWeight.bold : FontWeight.normal, 
+                                      decoration: phase.isSeen && !isActive && !isLastPlayed ? TextDecoration.lineThrough : null,
+                                      color: phase.isSeen && !isActive && !isLastPlayed ? Colors.grey : null,
+                                    )
+                                  ),
                                 ),
                                 const SizedBox(width: 12),
                                 Container(
@@ -3394,17 +3409,22 @@ class _EditorScreenState extends State<EditorScreen> {
                                 ),
                               ],
                             ),
-                          ) : Text(
-                            '(${chronologicalPhases.indexOf(phase) + 1}) $m:$s', 
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: (isActive || isLastPlayed) ? FontWeight.bold : FontWeight.normal, 
-                              decoration: phase.isSeen && !isActive && !isLastPlayed ? TextDecoration.lineThrough : null,
-                              color: (isActive || isLastPlayed) 
-                                  ? (isActive ? (isDark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C)) : (isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706)))
-                                  : (phase.isSeen ? Colors.grey : null)
-                            )
+                          ) : Container(
+                            padding: isActive ? const EdgeInsets.symmetric(horizontal: 4, vertical: 2) : null,
+                            decoration: isActive ? BoxDecoration(
+                              border: Border.all(color: const Color(0xFF900020), width: 1.0),
+                              borderRadius: BorderRadius.circular(4),
+                            ) : null,
+                            child: Text(
+                              '(${chronologicalPhases.indexOf(phase) + 1}) $m:$s', 
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: (isActive || isLastPlayed) ? FontWeight.bold : FontWeight.normal, 
+                                decoration: phase.isSeen && !isActive && !isLastPlayed ? TextDecoration.lineThrough : null,
+                                color: phase.isSeen && !isActive && !isLastPlayed ? Colors.grey : null,
+                              )
+                            ),
                           ),
                         ),
                         onTap: () => _playPhase(index, phases),

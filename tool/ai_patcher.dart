@@ -197,7 +197,7 @@ bool applyPatch(String rawClipboard) {
           if (newFileContents[filename]!.contains(trimmedOldCode)) {
             newFileContents[filename] = newFileContents[filename]!.replaceFirst(trimmedOldCode, newCode.trim());
           } else {
-            print('❌ Σφάλμα: Δεν βρέθηκε ο κώδικας στο $filename. (Μήπως έχει ήδη αλλαχτεί;)');
+            print('❌ Σφάλμα: Δεν βρέθηκε ο κώδικας στο $filename.');
             return false;
           }
         }
