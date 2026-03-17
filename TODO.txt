@@ -1,4 +1,6 @@
 
+oi fouskes sta vidoe controls
+
 να μπορώ να κάνω διαχείριση highlights και extract από full screen
 
 να σκεφτώ τι θα κάνω με το deep analize 

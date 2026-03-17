@@ -2666,9 +2666,9 @@ class _EditorScreenState extends State<EditorScreen> {
                     builder: (context) {
                       int vTurns = 0;
                       switch (widget.project.rotationPhaseLandscape) {
-                        case 1: vTurns = 3; break;
-                        case 2: vTurns = 1; break;
-                        case 3: vTurns = 3; break;
+                        case 1: vTurns = 2; break; // Video Bottom -> Up
+                        case 2: vTurns = 3; break; // Video Bottom -> Left
+                        case 3: vTurns = 1; break; // Video Bottom -> Right
                       }
                       return RotatedBox(
                         quarterTurns: vTurns,
@@ -2682,17 +2682,27 @@ class _EditorScreenState extends State<EditorScreen> {
                 else
                   AspectRatio(
                     aspectRatio: 16 / 9,
-                    child: RotatedBox(
-                      quarterTurns: widget.project.rotationPhasePortrait,
-                      child: Video(
-                        controller: controller,
-                        controls: NoVideoControls,
-                      ),
+                    child: Builder(
+                      builder: (context) {
+                        int pTurns = 0;
+                        switch (widget.project.rotationPhasePortrait) {
+                          case 1: pTurns = 3; break; // Video Bottom -> Right
+                          case 2: pTurns = 2; break; // Video Bottom -> Up
+                          case 3: pTurns = 1; break; // Video Bottom -> Left
+                        }
+                        return RotatedBox(
+                          quarterTurns: pTurns,
+                          child: Video(
+                            controller: controller,
+                            controls: NoVideoControls,
+                          ),
+                        );
+                      },
                     ),
                   ),
                 Positioned.fill(
                   child: RotatedBox(
-                    quarterTurns: (isFullscreen && (widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3)) ? 1 : 0,
+                    quarterTurns: (isFullscreen && (widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3)) ? 3 : 0,
                     child: Stack(
                       children: [
                         Positioned(
