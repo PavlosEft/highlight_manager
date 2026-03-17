@@ -2053,6 +2053,7 @@ class _EditorScreenState extends State<EditorScreen> {
   bool isAutoplaySuspended = false;
   bool isSeeking = false;
   bool isFullscreen = false;
+  int _rotationPhase = 0;
   
   List<HighlightPhase> historyStack = [];
   List<HighlightPhase> forwardStack = [];
@@ -2773,15 +2774,46 @@ class _EditorScreenState extends State<EditorScreen> {
                         isFullscreen = !isFullscreen;
                       });
                       if (isFullscreen) {
+                        _rotationPhase = 0;
                         SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeRight, DeviceOrientation.landscapeLeft]);
                         SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
                       } else {
+                        _rotationPhase = 0;
                         SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
                         SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
                       }
                     },
                   ),
                 ),
+                if (isFullscreen)
+                  Positioned(
+                    bottom: 44,
+                    right: 60,
+                    child: IconButton(
+                      icon: Icon(Icons.screen_rotation, color: Colors.grey.shade400, size: 28, shadows: const [Shadow(offset: Offset(-1, -1), color: Colors.black), Shadow(offset: Offset(1, -1), color: Colors.black), Shadow(offset: Offset(1, 1), color: Colors.black), Shadow(offset: Offset(-1, 1), color: Colors.black)]),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      onPressed: () {
+                        setState(() {
+                          _rotationPhase = (_rotationPhase + 1) % 4;
+                        });
+                        switch (_rotationPhase) {
+                          case 0:
+                            SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeRight, DeviceOrientation.landscapeLeft]);
+                            break;
+                          case 1:
+                            SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+                            break;
+                          case 2:
+                            SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft]);
+                            break;
+                          case 3:
+                            SystemChrome.setPreferredOrientations([DeviceOrientation.portraitDown]);
+                            break;
+                        }
+                      },
+                    ),
+                  ),
                 if (isFullscreen)
                   Positioned(
                     bottom: 0,
