@@ -285,6 +285,7 @@ class AppState extends ChangeNotifier {
   bool isLoading = true;
   String currentLang = 'en';
   bool isDarkMode = false;
+  String appDirPath = '';
 
   String t(String key) => translations[currentLang]?[key] ?? key;
 
@@ -316,6 +317,8 @@ class AppState extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       isDarkMode = prefs.getBool('isDarkMode') ?? false;
+      final directory = await getApplicationDocumentsDirectory();
+      appDirPath = '${directory.path}/HighlightManager';
     } catch (_) {}
     await loadAllProjects();
   }
@@ -638,6 +641,39 @@ class AppState extends ChangeNotifier {
       };
       await analysisFile.writeAsString(jsonEncode(analysisData));
       print('[TELEMETRY] Χρόνος εγγραφής JSON στο δίσκο: ${stepStopwatch.elapsedMilliseconds}ms');
+
+      onStatusUpdate("Δημιουργία μικρογραφιών...", 0.95);
+      try {
+        List<Map<String, dynamic>> extractTasks = [];
+        if (paths.length >= 4) {
+          for(int i=0; i<4; i++) extractTasks.add({'path': paths[i], 'time': videoDurations[i] * 0.2});
+        } else {
+          for(int i=0; i<4; i++) extractTasks.add({'path': paths[0], 'time': videoDurations[0] * (0.1 + (i*0.2))});
+        }
+
+        for (int i=0; i<4; i++) {
+          if (_isAnalysisCancelled) break;
+          String outPath = '${projectDir.path}/thumb_$i.jpg';
+          String inPath = extractTasks[i]['path'];
+          double time = extractTasks[i]['time'];
+
+          if (Platform.isWindows || Platform.isLinux) {
+            final ffmpegExe = await _getDesktopFFmpegPath();
+            await Process.run(ffmpegExe, ['-y', '-ss', time.toStringAsFixed(2), '-i', inPath, '-vframes', '1', '-vf', 'scale=320:-1', outPath]);
+          } else {
+            String safeInPath = inPath;
+            if (Platform.isAndroid && inPath.startsWith('content://')) {
+               try {
+                 final saf = await FFmpegKitConfig.getSafParameterForRead(inPath);
+                 if (saf != null) safeInPath = saf;
+               } catch (_) {}
+            }
+            await FFmpegKit.execute("-y -ss ${time.toStringAsFixed(2)} -i \"$safeInPath\" -vframes 1 -vf scale=320:-1 \"$outPath\"");
+          }
+        }
+      } catch (e) {
+        print('[ANALYZE] Σφάλμα μικρογραφιών: $e');
+      }
 
       // Υπολογισμός στόχου φάσεων: 250 φάσεις ανά 100 λεπτά (ή 2.5 φάσεις / λεπτό)
       double targetPhases = (totalDur / 60.0) * 2.5;
@@ -1352,7 +1388,7 @@ class HomeScreen extends StatelessWidget {
           padding: const EdgeInsets.all(12.0),
           child: Row(
             children: [
-              // Πλαίσιο Thumbnail
+              // Πλαίσιο Thumbnail (4-πλό κολάζ)
               Container(
                 width: 100,
                 height: 64,
@@ -1360,30 +1396,39 @@ class HomeScreen extends StatelessWidget {
                   color: Theme.of(context).colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    Icon(
-                      Icons.movie_filter_rounded, 
-                      size: 42, 
-                      color: Theme.of(context).colorScheme.tertiary
-                    ),
-                    Positioned(
-                      bottom: 4,
-                      right: 4,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Colors.black87,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          formatDuration(project.totalDuration),
-                          style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: File('${state.appDirPath}/${project.id}/thumb_0.jpg').existsSync()
+                    ? Column(
+                        children: [
+                          Expanded(
+                            child: Row(
+                              children: [
+                                Expanded(child: Image.file(File('${state.appDirPath}/${project.id}/thumb_0.jpg'), fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(color: Colors.black12))),
+                                const SizedBox(width: 2),
+                                Expanded(child: Image.file(File('${state.appDirPath}/${project.id}/thumb_1.jpg'), fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(color: Colors.black12))),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Expanded(
+                            child: Row(
+                              children: [
+                                Expanded(child: Image.file(File('${state.appDirPath}/${project.id}/thumb_2.jpg'), fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(color: Colors.black12))),
+                                const SizedBox(width: 2),
+                                Expanded(child: Image.file(File('${state.appDirPath}/${project.id}/thumb_3.jpg'), fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(color: Colors.black12))),
+                              ],
+                            ),
+                          ),
+                        ],
+                      )
+                    : Center(
+                        child: Icon(
+                          Icons.movie_filter_rounded, 
+                          size: 48, 
+                          color: Theme.of(context).colorScheme.tertiary
                         ),
                       ),
-                    ),
-                  ],
                 ),
               ),
               const SizedBox(width: 16),
@@ -1392,11 +1437,20 @@ class HomeScreen extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(project.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), maxLines: 1, overflow: TextOverflow.ellipsis),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${project.videoPaths.length} ${state.t('video_files')}\n${state.t('updated')} ${project.createdAt.day}/${project.createdAt.month}/${project.createdAt.year}',
-                      style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6), fontSize: 13, height: 1.4),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        const Icon(Icons.movie_creation_outlined, size: 14, color: Colors.grey),
+                        const SizedBox(width: 4),
+                        Text('(${project.videoPaths.length})', style: const TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)),
+                        const SizedBox(width: 12),
+                        const Icon(Icons.access_time, size: 14, color: Colors.grey),
+                        const SizedBox(width: 4),
+                        Text(formatDuration(project.totalDuration), style: const TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)),
+                      ]
                     ),
+                    const SizedBox(height: 4),
+                    Text('${project.createdAt.day}/${project.createdAt.month}/${project.createdAt.year}', style: const TextStyle(color: Colors.grey, fontSize: 11)),
                   ],
                 ),
               ),
