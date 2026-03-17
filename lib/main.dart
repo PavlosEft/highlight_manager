@@ -1435,6 +1435,7 @@ class HomeScreen extends StatelessWidget {
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(project.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), maxLines: 1, overflow: TextOverflow.ellipsis),
                     const SizedBox(height: 6),
@@ -1447,10 +1448,10 @@ class HomeScreen extends StatelessWidget {
                         const Icon(Icons.access_time, size: 14, color: Colors.grey),
                         const SizedBox(width: 4),
                         Text(formatDuration(project.totalDuration), style: const TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text('${project.createdAt.day}/${project.createdAt.month}/${project.createdAt.year}', textAlign: TextAlign.right, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.grey, fontSize: 11))),
                       ]
                     ),
-                    const SizedBox(height: 4),
-                    Text('${project.createdAt.day}/${project.createdAt.month}/${project.createdAt.year}', style: const TextStyle(color: Colors.grey, fontSize: 11)),
                   ],
                 ),
               ),
@@ -2650,14 +2651,14 @@ class _EditorScreenState extends State<EditorScreen> {
                     ),
                   ),
                 Positioned(
-                  top: 12,
-                  left: 12,
+                  top: 4,
+                  left: 4,
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       if (isFullscreen) ...[
                         IconButton(
-                          icon: const Icon(Icons.settings, color: Colors.white, size: 24, shadows: [Shadow(offset: Offset(-1, -1), color: Colors.black), Shadow(offset: Offset(1, -1), color: Colors.black), Shadow(offset: Offset(1, 1), color: Colors.black), Shadow(offset: Offset(-1, 1), color: Colors.black)]),
+                          icon: Icon(Icons.settings, color: Colors.grey.shade300, size: 24, shadows: const [Shadow(offset: Offset(-1, -1), color: Colors.black), Shadow(offset: Offset(1, -1), color: Colors.black), Shadow(offset: Offset(1, 1), color: Colors.black), Shadow(offset: Offset(-1, 1), color: Colors.black)]),
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(),
                           onPressed: () => _showSettingsSheet(context, Provider.of<AppState>(context, listen: false)),
@@ -2665,13 +2666,11 @@ class _EditorScreenState extends State<EditorScreen> {
                         const SizedBox(width: 8),
                       ],
                       Text(
-                        isFullscreen 
-                          ? '${activePhaseIndex >= 0 ? activePhaseIndex + 1 : 0} / ${widget.project.phases.length}'
-                          : 'Φάση: ${activePhaseIndex >= 0 ? activePhaseIndex + 1 : 0} / ${widget.project.phases.length}',
+                        '${activePhaseIndex >= 0 ? activePhaseIndex + 1 : 0} / ${widget.project.phases.length}',
                         style: TextStyle(
                           fontSize: isFullscreen ? 12 : 14,
                           fontWeight: FontWeight.bold,
-                          color: Colors.white,
+                          color: Colors.grey.shade300,
                           shadows: const [
                             Shadow(offset: Offset(-1, -1), color: Colors.black),
                             Shadow(offset: Offset(1, -1), color: Colors.black),
@@ -2685,39 +2684,42 @@ class _EditorScreenState extends State<EditorScreen> {
                   ),
                 ),
                 Positioned(
-                  bottom: isFullscreen ? 24 : 8,
-                  left: 12,
+                  bottom: 4,
+                  left: 4,
                   child: StreamBuilder<double>(
                     stream: player.stream.volume,
                     initialData: player.state.volume,
                     builder: (context, snapshot) {
                       final vol = snapshot.data ?? 100.0;
-                      return Row(
+                      return Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          SizedBox(
+                            height: 70,
+                            child: RotatedBox(
+                              quarterTurns: 3,
+                              child: SliderTheme(
+                                data: SliderTheme.of(context).copyWith(
+                                  trackHeight: 3.0,
+                                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6.0),
+                                  overlayShape: const RoundSliderOverlayShape(overlayRadius: 12.0),
+                                  activeTrackColor: Colors.grey.shade300,
+                                  inactiveTrackColor: Colors.grey.shade600,
+                                  thumbColor: Colors.grey.shade300,
+                                ),
+                                child: Slider(
+                                  value: vol.clamp(0.0, 100.0),
+                                  max: 100.0,
+                                  onChanged: (v) => player.setVolume(v),
+                                ),
+                              ),
+                            ),
+                          ),
                           IconButton(
-                            icon: Icon(vol == 0 ? Icons.volume_off : Icons.volume_up, color: Colors.white, size: 24, shadows: const [Shadow(offset: Offset(-1, -1), color: Colors.black), Shadow(offset: Offset(1, -1), color: Colors.black), Shadow(offset: Offset(1, 1), color: Colors.black), Shadow(offset: Offset(-1, 1), color: Colors.black)]),
+                            icon: Icon(vol == 0 ? Icons.volume_off : Icons.volume_up, color: Colors.grey.shade300, size: 24, shadows: const [Shadow(offset: Offset(-1, -1), color: Colors.black), Shadow(offset: Offset(1, -1), color: Colors.black), Shadow(offset: Offset(1, 1), color: Colors.black), Shadow(offset: Offset(-1, 1), color: Colors.black)]),
                             padding: EdgeInsets.zero,
                             constraints: const BoxConstraints(),
                             onPressed: () => player.setVolume(vol == 0 ? 100.0 : 0.0),
-                          ),
-                          SizedBox(
-                            width: 100,
-                            child: SliderTheme(
-                              data: SliderTheme.of(context).copyWith(
-                                trackHeight: 3.0,
-                                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6.0),
-                                overlayShape: const RoundSliderOverlayShape(overlayRadius: 12.0),
-                                activeTrackColor: Colors.white,
-                                inactiveTrackColor: Colors.white38,
-                                thumbColor: Colors.white,
-                              ),
-                              child: Slider(
-                                value: vol.clamp(0.0, 100.0),
-                                max: 100.0,
-                                onChanged: (v) => player.setVolume(v),
-                              ),
-                            ),
                           ),
                         ],
                       );
@@ -2725,18 +2727,18 @@ class _EditorScreenState extends State<EditorScreen> {
                   ),
                 ),
                 Positioned(
-                  bottom: isFullscreen ? 24 : 8,
-                  right: 12,
+                  bottom: 4,
+                  right: 4,
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
                         '${_formatDuration(posDuration)} / ${_formatDuration(totalDur)}',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                          shadows: [
+                          color: Colors.grey.shade300,
+                          shadows: const [
                             Shadow(offset: Offset(-1, -1), color: Colors.black),
                             Shadow(offset: Offset(1, -1), color: Colors.black),
                             Shadow(offset: Offset(1, 1), color: Colors.black),
@@ -2747,7 +2749,7 @@ class _EditorScreenState extends State<EditorScreen> {
                       ),
                       const SizedBox(width: 8),
                       IconButton(
-                        icon: Icon(isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen, color: Colors.white, size: 28, shadows: const [Shadow(offset: Offset(-1, -1), color: Colors.black), Shadow(offset: Offset(1, -1), color: Colors.black), Shadow(offset: Offset(1, 1), color: Colors.black), Shadow(offset: Offset(-1, 1), color: Colors.black)]),
+                        icon: Icon(isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen, color: Colors.grey.shade300, size: 28, shadows: const [Shadow(offset: Offset(-1, -1), color: Colors.black), Shadow(offset: Offset(1, -1), color: Colors.black), Shadow(offset: Offset(1, 1), color: Colors.black), Shadow(offset: Offset(-1, 1), color: Colors.black)]),
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
                         onPressed: () {
@@ -3167,16 +3169,16 @@ class _EditorScreenState extends State<EditorScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.black87,
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: RichText(
                   text: TextSpan(
                     style: const TextStyle(fontSize: 15),
                     children: [
-                      TextSpan(text: '${activePhaseIndex >= 0 ? activePhaseIndex + 1 : 0} ', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                      const TextSpan(text: '/ ', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                      TextSpan(text: '${widget.project.phases.length}', style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                      TextSpan(text: '${activePhaseIndex >= 0 ? activePhaseIndex + 1 : 0} ', style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
+                      const TextSpan(text: '/ ', style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
+                      TextSpan(text: '${widget.project.phases.length}', style: const TextStyle(color: Color(0xFF900020), fontWeight: FontWeight.bold)),
                     ]
                   )
                 ),
@@ -3198,7 +3200,24 @@ class _EditorScreenState extends State<EditorScreen> {
               else
                 IconButton(
                   icon: const Icon(Icons.cleaning_services, size: 20),
-                  onPressed: _resetSeen,
+                  onPressed: () async {
+                    bool? confirm = await showDialog<bool>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('Επαναφορά Φάσεων', style: TextStyle(fontWeight: FontWeight.bold)),
+                        content: const Text('Είστε σίγουροι ότι θέλετε να μηδενίσετε το ιστορικό προβολής (Seen) για όλες τις φάσεις;'),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(state.t('no'))),
+                          FilledButton(
+                            onPressed: () => Navigator.pop(ctx, true),
+                            style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+                            child: Text(state.t('yes')),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (confirm == true) _resetSeen();
+                  },
                   tooltip: 'Reset Seen',
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
