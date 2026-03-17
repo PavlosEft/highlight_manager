@@ -73,6 +73,8 @@ class Project {
   bool skipSeen;
   bool showHighlightsOnly;
   int lastActivePhaseIndex;
+  int rotationPhaseLandscape;
+  int rotationPhasePortrait;
 
   Project({
     required this.id,
@@ -90,6 +92,8 @@ class Project {
     this.skipSeen = false,
     this.showHighlightsOnly = false,
     this.lastActivePhaseIndex = -1,
+    this.rotationPhaseLandscape = 0,
+    this.rotationPhasePortrait = 0,
   })  : videoDurations = videoDurations ?? [],
         phases = phases ?? [],
         createdAt = createdAt ?? DateTime.now();
@@ -110,6 +114,8 @@ class Project {
         'skipSeen': skipSeen,
         'showHighlightsOnly': showHighlightsOnly,
         'lastActivePhaseIndex': lastActivePhaseIndex,
+        'rotationPhaseLandscape': rotationPhaseLandscape,
+        'rotationPhasePortrait': rotationPhasePortrait,
       };
 
   factory Project.fromJson(Map<String, dynamic> json) => Project(
@@ -132,6 +138,8 @@ class Project {
         skipSeen: json['skipSeen'] ?? false,
         showHighlightsOnly: json['showHighlightsOnly'] ?? false,
         lastActivePhaseIndex: json['lastActivePhaseIndex'] ?? -1,
+        rotationPhaseLandscape: json['rotationPhaseLandscape'] ?? 0,
+        rotationPhasePortrait: json['rotationPhasePortrait'] ?? 0,
       );
 }
 
@@ -2053,7 +2061,6 @@ class _EditorScreenState extends State<EditorScreen> {
   bool isAutoplaySuspended = false;
   bool isSeeking = false;
   bool isFullscreen = false;
-  int _rotationPhase = 0;
   
   List<HighlightPhase> historyStack = [];
   List<HighlightPhase> forwardStack = [];
@@ -2655,165 +2662,186 @@ class _EditorScreenState extends State<EditorScreen> {
               alignment: Alignment.center,
               children: [
                 if (isFullscreen)
-                  Video(
-                    controller: controller,
-                    controls: NoVideoControls,
+                  Builder(
+                    builder: (context) {
+                      int vTurns = 0;
+                      switch (widget.project.rotationPhaseLandscape) {
+                        case 1: vTurns = 3; break;
+                        case 2: vTurns = 1; break;
+                        case 3: vTurns = 3; break;
+                      }
+                      return RotatedBox(
+                        quarterTurns: vTurns,
+                        child: Video(
+                          controller: controller,
+                          controls: NoVideoControls,
+                        ),
+                      );
+                    },
                   )
                 else
                   AspectRatio(
                     aspectRatio: 16 / 9,
-                    child: Video(
-                      controller: controller,
-                      controls: NoVideoControls,
+                    child: RotatedBox(
+                      quarterTurns: widget.project.rotationPhasePortrait,
+                      child: Video(
+                        controller: controller,
+                        controls: NoVideoControls,
+                      ),
                     ),
                   ),
-                Positioned(
-                  top: isFullscreen ? 16 : 4,
-                  left: isFullscreen ? 8 : 4,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.black54,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
+                Positioned.fill(
+                  child: RotatedBox(
+                    quarterTurns: (isFullscreen && (widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3)) ? 1 : 0,
+                    child: Stack(
                       children: [
-                        if (isFullscreen) ...[
-                          IconButton(
-                            icon: const Icon(Icons.settings, color: Colors.white70, size: 24),
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                            onPressed: () => _showSettingsSheet(context, Provider.of<AppState>(context, listen: false)),
-                          ),
-                          const SizedBox(width: 4),
-                        ],
-                        Text(
-                          '${activePhaseIndex >= 0 ? activePhaseIndex + 1 : 0} / ${widget.project.phases.length}',
-                          style: TextStyle(
-                            fontSize: isFullscreen ? 14 : 12,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white70,
+                        Positioned(
+                          top: isFullscreen ? 16 : 4,
+                          left: isFullscreen ? 8 : 4,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.black26,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (isFullscreen) ...[
+                                  IconButton(
+                                    icon: const Icon(Icons.settings, color: Colors.white70, size: 24, shadows: [Shadow(offset: Offset(-2, -2), color: Colors.black), Shadow(offset: Offset(2, -2), color: Colors.black), Shadow(offset: Offset(2, 2), color: Colors.black), Shadow(offset: Offset(-2, 2), color: Colors.black), Shadow(blurRadius: 8, color: Colors.black)]),
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                    onPressed: () => _showSettingsSheet(context, Provider.of<AppState>(context, listen: false)),
+                                  ),
+                                  const SizedBox(width: 4),
+                                ],
+                                Text(
+                                  '${activePhaseIndex >= 0 ? activePhaseIndex + 1 : 0} / ${widget.project.phases.length}',
+                                  style: TextStyle(
+                                    fontSize: isFullscreen ? 14 : 12,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white70,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
-                      ],
+                Positioned(
+                  top: isFullscreen ? 16 : 4,
+                  right: isFullscreen ? 8 : 4,
+                  child: Container(
+                    decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(8)),
+                    child: IconButton(
+                      icon: const Icon(Icons.screen_rotation, color: Colors.white70, size: 24, shadows: [Shadow(offset: Offset(-2, -2), color: Colors.black), Shadow(offset: Offset(2, -2), color: Colors.black), Shadow(offset: Offset(2, 2), color: Colors.black), Shadow(offset: Offset(-2, 2), color: Colors.black), Shadow(blurRadius: 8, color: Colors.black)]),
+                      onPressed: () {
+                        setState(() {
+                          if (isFullscreen) {
+                            widget.project.rotationPhaseLandscape = (widget.project.rotationPhaseLandscape + 1) % 4;
+                          } else {
+                            widget.project.rotationPhasePortrait = (widget.project.rotationPhasePortrait + 1) % 4;
+                          }
+                        });
+                        Provider.of<AppState>(context, listen: false).saveProject(widget.project);
+                      },
                     ),
                   ),
                 ),
                 Positioned(
                   bottom: isFullscreen ? 32 : 0,
                   left: isFullscreen ? 16 : 0,
-                  child: StreamBuilder<double>(
-                    stream: player.stream.volume,
-                    initialData: player.state.volume,
-                    builder: (context, snapshot) {
-                      final vol = snapshot.data ?? 100.0;
-                      return Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          SizedBox(
-                            height: isFullscreen ? 130 : 80,
-                            child: RotatedBox(
-                              quarterTurns: 3,
-                              child: SliderTheme(
-                                data: SliderTheme.of(context).copyWith(
-                                  trackHeight: 1.5,
-                                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6.0),
-                                  overlayShape: const RoundSliderOverlayShape(overlayRadius: 12.0),
-                                  activeTrackColor: Colors.grey.shade400,
-                                  inactiveTrackColor: Colors.grey.shade700,
-                                  thumbColor: Colors.grey.shade400,
-                                ),
-                                child: Slider(
-                                  value: vol.clamp(0.0, 100.0),
-                                  max: 100.0,
-                                  onChanged: (v) => player.setVolume(v),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(8)),
+                    child: StreamBuilder<double>(
+                      stream: player.stream.volume,
+                      initialData: player.state.volume,
+                      builder: (context, snapshot) {
+                        final vol = snapshot.data ?? 100.0;
+                        return Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SizedBox(
+                              height: isFullscreen ? 130 : 80,
+                              child: RotatedBox(
+                                quarterTurns: 3,
+                                child: SliderTheme(
+                                  data: SliderTheme.of(context).copyWith(
+                                    trackHeight: 1.5,
+                                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6.0),
+                                    overlayShape: const RoundSliderOverlayShape(overlayRadius: 12.0),
+                                    activeTrackColor: Colors.grey.shade400,
+                                    inactiveTrackColor: Colors.grey.shade700,
+                                    thumbColor: Colors.grey.shade400,
+                                  ),
+                                  child: Slider(
+                                    value: vol.clamp(0.0, 100.0),
+                                    max: 100.0,
+                                    onChanged: (v) => player.setVolume(v),
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                          IconButton(
-                            icon: Icon(vol == 0 ? Icons.volume_off : Icons.volume_up, color: Colors.grey.shade400, size: 24, shadows: const [Shadow(offset: Offset(-1, -1), color: Colors.black), Shadow(offset: Offset(1, -1), color: Colors.black), Shadow(offset: Offset(1, 1), color: Colors.black), Shadow(offset: Offset(-1, 1), color: Colors.black)]),
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                            onPressed: () => player.setVolume(vol == 0 ? 100.0 : 0.0),
-                          ),
-                        ],
-                      );
-                    }
+                            IconButton(
+                              icon: Icon(vol == 0 ? Icons.volume_off : Icons.volume_up, color: Colors.grey.shade400, size: 24, shadows: const [Shadow(offset: Offset(-2, -2), color: Colors.black), Shadow(offset: Offset(2, -2), color: Colors.black), Shadow(offset: Offset(2, 2), color: Colors.black), Shadow(offset: Offset(-2, 2), color: Colors.black), Shadow(blurRadius: 8, color: Colors.black)]),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              onPressed: () => player.setVolume(vol == 0 ? 100.0 : 0.0),
+                            ),
+                          ],
+                        );
+                      }
+                    ),
                   ),
                 ),
                 Positioned(
                   bottom: isFullscreen ? 20 : 4,
                   right: isFullscreen ? 16 : 8,
-                  child: Text(
-                    '${_formatDuration(posDuration)} / ${_formatDuration(totalDur)}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey.shade400,
-                      shadows: const [
-                        Shadow(offset: Offset(-1, -1), color: Colors.black),
-                        Shadow(offset: Offset(1, -1), color: Colors.black),
-                        Shadow(offset: Offset(1, 1), color: Colors.black),
-                        Shadow(offset: Offset(-1, 1), color: Colors.black),
-                        Shadow(blurRadius: 4, color: Colors.black),
-                      ],
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(8)),
+                    child: Text(
+                      '${_formatDuration(posDuration)} / ${_formatDuration(totalDur)}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey.shade400,
+                        shadows: const [
+                          Shadow(offset: Offset(-2, -2), color: Colors.black),
+                          Shadow(offset: Offset(2, -2), color: Colors.black),
+                          Shadow(offset: Offset(2, 2), color: Colors.black),
+                          Shadow(offset: Offset(-2, 2), color: Colors.black),
+                          Shadow(blurRadius: 8, color: Colors.black),
+                        ],
+                      ),
                     ),
                   ),
                 ),
                 Positioned(
                   bottom: isFullscreen ? 44 : 22,
                   right: isFullscreen ? 16 : 2,
-                  child: IconButton(
-                    icon: Icon(isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen, color: Colors.grey.shade400, size: 28, shadows: const [Shadow(offset: Offset(-1, -1), color: Colors.black), Shadow(offset: Offset(1, -1), color: Colors.black), Shadow(offset: Offset(1, 1), color: Colors.black), Shadow(offset: Offset(-1, 1), color: Colors.black)]),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                    onPressed: () {
-                      setState(() {
-                        isFullscreen = !isFullscreen;
-                      });
-                      if (isFullscreen) {
-                        _rotationPhase = 0;
-                        SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeRight, DeviceOrientation.landscapeLeft]);
-                        SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-                      } else {
-                        _rotationPhase = 0;
-                        SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-                        SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-                      }
-                    },
-                  ),
-                ),
-                if (isFullscreen)
-                  Positioned(
-                    bottom: 44,
-                    right: 60,
+                  child: Container(
+                    decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(8)),
                     child: IconButton(
-                      icon: Icon(Icons.screen_rotation, color: Colors.grey.shade400, size: 28, shadows: const [Shadow(offset: Offset(-1, -1), color: Colors.black), Shadow(offset: Offset(1, -1), color: Colors.black), Shadow(offset: Offset(1, 1), color: Colors.black), Shadow(offset: Offset(-1, 1), color: Colors.black)]),
+                      icon: Icon(isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen, color: Colors.grey.shade400, size: 28, shadows: const [Shadow(offset: Offset(-2, -2), color: Colors.black), Shadow(offset: Offset(2, -2), color: Colors.black), Shadow(offset: Offset(2, 2), color: Colors.black), Shadow(offset: Offset(-2, 2), color: Colors.black), Shadow(blurRadius: 8, color: Colors.black)]),
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
                       onPressed: () {
                         setState(() {
-                          _rotationPhase = (_rotationPhase + 1) % 4;
+                          isFullscreen = !isFullscreen;
                         });
-                        switch (_rotationPhase) {
-                          case 0:
-                            SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeRight, DeviceOrientation.landscapeLeft]);
-                            break;
-                          case 1:
-                            SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-                            break;
-                          case 2:
-                            SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft]);
-                            break;
-                          case 3:
-                            SystemChrome.setPreferredOrientations([DeviceOrientation.portraitDown]);
-                            break;
+                        if (isFullscreen) {
+                          SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeRight, DeviceOrientation.landscapeLeft]);
+                          SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+                        } else {
+                          SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+                          SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
                         }
                       },
                     ),
                   ),
+                ),
                 if (isFullscreen)
                   Positioned(
                     bottom: 0,
@@ -2882,6 +2910,10 @@ class _EditorScreenState extends State<EditorScreen> {
                       );
                     },
                   ),
+                      ],
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
