@@ -2766,7 +2766,7 @@ class _EditorScreenState extends State<EditorScreen> {
                   bottom: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 56 : 40) : 16,
                   left: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 16 : 12) : 4,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+                    padding: EdgeInsets.symmetric(vertical: 6, horizontal: isFullscreen ? 4 : 2),
                     decoration: BoxDecoration(color: Colors.black45, borderRadius: BorderRadius.circular(16)),
                     child: StreamBuilder<double>(
                       stream: player.stream.volume,
@@ -2799,7 +2799,7 @@ class _EditorScreenState extends State<EditorScreen> {
                             ),
                             GestureDetector(
                               child: Padding(
-                                padding: const EdgeInsets.all(4.0),
+                                padding: EdgeInsets.all(isFullscreen ? 4.0 : 2.0),
                                 child: Icon(vol == 0 ? Icons.volume_off : Icons.volume_up, color: Colors.grey.shade400, size: 24),
                               ),
                               onTap: () => player.setVolume(vol == 0 ? 100.0 : 0.0),
@@ -3058,143 +3058,162 @@ class _EditorScreenState extends State<EditorScreen> {
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (ctx) {
+        final isPortrait = MediaQuery.of(ctx).orientation == Orientation.portrait || (isFullscreen && (widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3));
         return StatefulBuilder(
           builder: (BuildContext context, StateSetter setModalState) {
-            return Padding(
-              padding: EdgeInsets.only(
-                left: 16.0, right: 16.0, top: 16.0,
-                bottom: MediaQuery.of(ctx).viewInsets.bottom + 16.0
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Center(child: Text('Ρυθμίσεις', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
-                  const Divider(),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Ευαισθησία: ${sensitivity.toInt()}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                            Slider(
-                              value: sensitivity, max: 100,
-                              onChanged: (v) {
-                                setModalState(() => sensitivity = v);
-                                setState(() => sensitivity = v);
-                                widget.project.sensitivity = v;
-                              },
-                              onChangeEnd: (v) {
-                                print('----------------------------------------------------');
-                                print('[USER ACTION] Αλλαγή Sensitivity: ${v.toInt()}');
-                                print('----------------------------------------------------');
-                                _recalcPhases();
-                                state.saveProject(widget.project);
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Ομαδοποίηση: ${grouping.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                            Slider(
-                              value: grouping, max: 10,
-                              onChanged: (v) {
-                                setModalState(() => grouping = v);
-                                setState(() => grouping = v);
-                                widget.project.grouping = v;
-                              },
-                              onChangeEnd: (v) {
-                                print('----------------------------------------------------');
-                                print('[USER ACTION] Αλλαγή Grouping: ${v.toStringAsFixed(1)}s');
-                                print('----------------------------------------------------');
-                                _recalcPhases();
-                                state.saveProject(widget.project);
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
+            
+            Widget buildSensitivity() => Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Ευαισθησία: ${sensitivity.toInt()}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                SliderTheme(
+                  data: SliderTheme.of(ctx).copyWith(trackShape: const RectangularSliderTrackShape()),
+                  child: Slider(
+                    value: sensitivity, max: 100,
+                    onChanged: (v) {
+                      setModalState(() => sensitivity = v);
+                      widget.project.sensitivity = v;
+                    },
+                    onChangeEnd: (v) {
+                      setState(() => sensitivity = v);
+                      _recalcPhases();
+                      state.saveProject(widget.project);
+                    },
                   ),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Start Offset: ${startOffset.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                            Slider(
-                              value: startOffset, max: 10,
-                              onChanged: (v) {
-                                setModalState(() => startOffset = v);
-                                setState(() => startOffset = v);
-                                widget.project.startOffset = v;
-                              },
-                              onChangeEnd: (v) => state.saveProject(widget.project),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('End Offset: ${endOffset.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                            Slider(
-                              value: endOffset, max: 10,
-                              onChanged: (v) {
-                                setModalState(() => endOffset = v);
-                                setState(() => endOffset = v);
-                                widget.project.endOffset = v;
-                              },
-                              onChangeEnd: (v) => state.saveProject(widget.project),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
+                ),
+              ],
+            );
+
+            Widget buildGrouping() => Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Ομαδοποίηση: ${grouping.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                SliderTheme(
+                  data: SliderTheme.of(ctx).copyWith(trackShape: const RectangularSliderTrackShape()),
+                  child: Slider(
+                    value: grouping, max: 10, divisions: 10,
+                    onChanged: (v) {
+                      setModalState(() => grouping = v);
+                      widget.project.grouping = v;
+                    },
+                    onChangeEnd: (v) {
+                      setState(() => grouping = v);
+                      _recalcPhases();
+                      state.saveProject(widget.project);
+                    },
                   ),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
+                ),
+              ],
+            );
+
+            return SafeArea(
+              child: Padding(
+                padding: EdgeInsets.only(
+                  left: 16.0, right: 16.0, top: 16.0,
+                  bottom: MediaQuery.of(ctx).viewInsets.bottom + 8.0
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Center(child: Text('Ρυθμίσεις', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
+                    const Divider(),
+                    if (isPortrait) ...[
+                      buildSensitivity(),
+                      buildGrouping(),
+                    ] else ...[
                       Row(
                         children: [
-                          Checkbox(value: autoplay, onChanged: (v) {
-                            setModalState(() => autoplay = v ?? false);
-                            setState(() => autoplay = v ?? false);
-                            widget.project.autoplay = autoplay;
-                            state.saveProject(widget.project);
-                          }),
-                          const Text('Autoplay', style: TextStyle(fontSize: 12)),
-                        ],
-                      ),
-                      Row(
-                        children: [
-                          Checkbox(value: skipSeen, onChanged: (v) {
-                            setModalState(() => skipSeen = v ?? false);
-                            setState(() => skipSeen = v ?? false);
-                            widget.project.skipSeen = skipSeen;
-                            state.saveProject(widget.project);
-                          }),
-                          const Text('Skip Seen', style: TextStyle(fontSize: 12)),
+                          Expanded(child: buildSensitivity()),
+                          Expanded(child: buildGrouping()),
                         ],
                       ),
                     ],
-                  ),
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('Εντάξει'),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Start Offset: ${startOffset.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                              SliderTheme(
+                                data: SliderTheme.of(ctx).copyWith(trackShape: const RectangularSliderTrackShape()),
+                                child: Slider(
+                                  value: startOffset, max: 10, divisions: 10,
+                                  onChanged: (v) {
+                                    setModalState(() => startOffset = v);
+                                    widget.project.startOffset = v;
+                                  },
+                                  onChangeEnd: (v) {
+                                    setState(() => startOffset = v);
+                                    state.saveProject(widget.project);
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('End Offset: ${endOffset.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                              SliderTheme(
+                                data: SliderTheme.of(ctx).copyWith(trackShape: const RectangularSliderTrackShape()),
+                                child: Slider(
+                                  value: endOffset, max: 10, divisions: 10,
+                                  onChanged: (v) {
+                                    setModalState(() => endOffset = v);
+                                    widget.project.endOffset = v;
+                                  },
+                                  onChangeEnd: (v) {
+                                    setState(() => endOffset = v);
+                                    state.saveProject(widget.project);
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                ],
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        Row(
+                          children: [
+                            Checkbox(visualDensity: VisualDensity.compact, value: autoplay, onChanged: (v) {
+                              setModalState(() => autoplay = v ?? false);
+                              setState(() => autoplay = v ?? false);
+                              widget.project.autoplay = autoplay;
+                              state.saveProject(widget.project);
+                            }),
+                            const Text('Autoplay', style: TextStyle(fontSize: 12)),
+                          ],
+                        ),
+                        Row(
+                          children: [
+                            Checkbox(visualDensity: VisualDensity.compact, value: skipSeen, onChanged: (v) {
+                              setModalState(() => skipSeen = v ?? false);
+                              setState(() => skipSeen = v ?? false);
+                              widget.project.skipSeen = skipSeen;
+                              state.saveProject(widget.project);
+                            }),
+                          const Text('Skip Seen', style: TextStyle(fontSize: 12)),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('OK'),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             );
           }
@@ -3349,9 +3368,7 @@ class _EditorScreenState extends State<EditorScreen> {
                     final isLastPlayed = (currentPlayingPhase == phase && !isTrackingPhase);
                     
                     Color bgColor;
-                    if (isActive || isLastPlayed) {
-                      bgColor = isDark ? const Color(0xFF3F1018) : const Color(0xFFFCE8EB);
-                    } else if (phase.isHighlight) {
+                    if (phase.isHighlight) {
                       bgColor = isDark ? const Color(0xFF4A148C) : const Color(0xFFF3E5F5);
                     } else {
                       bgColor = isDark ? const Color(0xFF2C2C34) : Colors.white;
@@ -3511,30 +3528,40 @@ class _EditorScreenState extends State<EditorScreen> {
                   },
                 ),
         ),
-        if (showHighlightsOnly)
-          Container(
-            padding: const EdgeInsets.all(8.0),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.3),
-              border: Border(top: BorderSide(color: Theme.of(context).dividerColor)),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                child: FilledButton(
-                  style: FilledButton.styleFrom(backgroundColor: const Color(0xFF2563EB), padding: const EdgeInsets.symmetric(vertical: 16)),
-                  onPressed: () => _showExportDialog(context, 'join'),
-                  child: const Text('Export Video', style: TextStyle(fontWeight: FontWeight.bold)),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: FilledButton(
-                  style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0D9488), padding: const EdgeInsets.symmetric(vertical: 16)),
-                  onPressed: () => _showExportDialog(context, 'separate'),
-                  child: const Text('Export Clips', style: TextStyle(fontWeight: FontWeight.bold)),
-                ),
-              ),
+        SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Divider(height: 1, thickness: 1, color: Theme.of(context).dividerColor),
+              if (showHighlightsOnly)
+                Container(
+                  padding: const EdgeInsets.all(8.0),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.3),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton(
+                          style: FilledButton.styleFrom(backgroundColor: const Color(0xFF2563EB), padding: const EdgeInsets.symmetric(vertical: 16)),
+                          onPressed: () => _showExportDialog(context, 'join'),
+                          child: const Text('Export Video', style: TextStyle(fontWeight: FontWeight.bold)),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: FilledButton(
+                          style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0D9488), padding: const EdgeInsets.symmetric(vertical: 16)),
+                          onPressed: () => _showExportDialog(context, 'separate'),
+                          child: const Text('Export Clips', style: TextStyle(fontWeight: FontWeight.bold)),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                const SizedBox(height: 8),
             ],
           ),
         ),
