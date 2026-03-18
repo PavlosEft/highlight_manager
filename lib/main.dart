@@ -2627,6 +2627,11 @@ class _EditorScreenState extends State<EditorScreen> {
     final posDuration = Duration(milliseconds: (globalPositionSeconds * 1000).toInt());
     final totalDur = Duration(milliseconds: (widget.project.totalDuration * 1000).toInt());
 
+    int uiTurns = 0;
+    if (isFullscreen) {
+      if (widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) uiTurns = 3;
+    }
+
     Widget videoContainer = GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTapUp: (details) {
@@ -2666,9 +2671,9 @@ class _EditorScreenState extends State<EditorScreen> {
                     builder: (context) {
                       int vTurns = 0;
                       switch (widget.project.rotationPhaseLandscape) {
-                        case 1: vTurns = 2; break; // Video Bottom -> Up
-                        case 2: vTurns = 3; break; // Video Bottom -> Left
-                        case 3: vTurns = 1; break; // Video Bottom -> Right
+                        case 1: vTurns = 2; break; // 1ο: ΜΟΝΟ βίντεο 180 (τα πάνω κάτω)
+                        case 2: vTurns = 3; break; // 2ο: UI πλάι, βίντεο κάτω μεριά δεξιά
+                        case 3: vTurns = 1; break; // 3ο: UI πλάι, βίντεο κάτω μεριά αριστερά
                       }
                       return RotatedBox(
                         quarterTurns: vTurns,
@@ -2702,14 +2707,14 @@ class _EditorScreenState extends State<EditorScreen> {
                   ),
                 Positioned.fill(
                   child: RotatedBox(
-                    quarterTurns: (isFullscreen && (widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3)) ? 3 : 0,
+                    quarterTurns: uiTurns,
                     child: Stack(
                       children: [
                         Positioned(
                           top: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 12 : 12) : 4,
                           left: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 16 : 12) : 4,
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            padding: EdgeInsets.only(left: isFullscreen ? 2 : 8, right: 8, top: 4, bottom: 4),
                             decoration: BoxDecoration(
                               color: Colors.black45,
                               borderRadius: BorderRadius.circular(16),
@@ -2719,13 +2724,14 @@ class _EditorScreenState extends State<EditorScreen> {
                               children: [
                                 if (isFullscreen) ...[
                                   GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
                                     onTap: () => _showSettingsSheet(context, Provider.of<AppState>(context, listen: false)),
                                     child: const Padding(
-                                      padding: EdgeInsets.all(2.0),
-                                      child: Icon(Icons.settings, color: Colors.white70, size: 22),
+                                      padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                                      child: Icon(Icons.settings, color: Colors.white70, size: 24),
                                     ),
                                   ),
-                                  const SizedBox(width: 6),
+                                  const SizedBox(width: 2),
                                 ],
                                 Text(
                                   '${activePhaseIndex >= 0 ? activePhaseIndex + 1 : 0} / ${widget.project.phases.length}',
@@ -2745,8 +2751,9 @@ class _EditorScreenState extends State<EditorScreen> {
                   child: Container(
                     decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
                     child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
                       child: const Padding(
-                        padding: EdgeInsets.all(6.0),
+                        padding: EdgeInsets.all(12.0),
                         child: Icon(Icons.screen_rotation, color: Colors.white70, size: 24),
                       ),
                       onTap: () {
@@ -2798,8 +2805,9 @@ class _EditorScreenState extends State<EditorScreen> {
                               ),
                             ),
                             GestureDetector(
+                              behavior: HitTestBehavior.opaque,
                               child: Padding(
-                                padding: EdgeInsets.all(isFullscreen ? 4.0 : 2.0),
+                                padding: EdgeInsets.all(isFullscreen ? 10.0 : 6.0),
                                 child: Icon(vol == 0 ? Icons.volume_off : Icons.volume_up, color: Colors.grey.shade400, size: 24),
                               ),
                               onTap: () => player.setVolume(vol == 0 ? 100.0 : 0.0),
@@ -2833,9 +2841,10 @@ class _EditorScreenState extends State<EditorScreen> {
                       Container(
                         decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
                         child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
                           child: Padding(
-                            padding: const EdgeInsets.all(6.0),
-                            child: Icon(isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen, color: Colors.grey.shade400, size: 26),
+                            padding: EdgeInsets.all(isFullscreen ? 12.0 : 6.0),
+                            child: Icon(isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen, color: Colors.grey.shade400, size: isFullscreen ? 34 : 26),
                           ),
                           onTap: () {
                             setState(() {
@@ -3053,173 +3062,247 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   void _showSettingsSheet(BuildContext context, AppState state) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (ctx) {
-        final isPortrait = MediaQuery.of(ctx).orientation == Orientation.portrait || (isFullscreen && (widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3));
-        return StatefulBuilder(
-          builder: (BuildContext context, StateSetter setModalState) {
-            
-            Widget buildSensitivity() => Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Ευαισθησία: ${sensitivity.toInt()}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                SliderTheme(
-                  data: SliderTheme.of(ctx).copyWith(trackShape: const RectangularSliderTrackShape()),
-                  child: Slider(
-                    value: sensitivity, max: 100,
-                    onChanged: (v) {
-                      setModalState(() => sensitivity = v);
-                      widget.project.sensitivity = v;
-                    },
-                    onChangeEnd: (v) {
-                      setState(() => sensitivity = v);
-                      _recalcPhases();
-                      state.saveProject(widget.project);
-                    },
-                  ),
-                ),
-              ],
-            );
+    int uiTurns = 0;
+    if (isFullscreen) {
+      if (widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) uiTurns = 3;
+    }
+    final bool isRotatedFullscreen = uiTurns != 0;
+    
+    Widget buildSettingsContent(BuildContext ctx, StateSetter setModalState, bool isPortraitLayout) {
+      Widget buildSensitivity() => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Ευαισθησία: ${sensitivity.toInt()}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+          SliderTheme(
+            data: SliderTheme.of(ctx).copyWith(trackShape: const RectangularSliderTrackShape()),
+            child: Slider(
+              value: sensitivity, max: 100,
+              onChanged: (v) {
+                setModalState(() => sensitivity = v);
+              },
+              onChangeEnd: (v) {
+                setState(() {
+                  sensitivity = v;
+                  widget.project.sensitivity = v;
+                });
+                _recalcPhases();
+                state.saveProject(widget.project);
+              },
+            ),
+          ),
+        ],
+      );
 
-            Widget buildGrouping() => Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Ομαδοποίηση: ${grouping.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                SliderTheme(
-                  data: SliderTheme.of(ctx).copyWith(trackShape: const RectangularSliderTrackShape()),
-                  child: Slider(
-                    value: grouping, max: 10, divisions: 10,
-                    onChanged: (v) {
-                      setModalState(() => grouping = v);
-                      widget.project.grouping = v;
-                    },
-                    onChangeEnd: (v) {
-                      setState(() => grouping = v);
-                      _recalcPhases();
-                      state.saveProject(widget.project);
-                    },
-                  ),
-                ),
-              ],
-            );
+      Widget buildGrouping() => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Ομαδοποίηση: ${grouping.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+          SliderTheme(
+            data: SliderTheme.of(ctx).copyWith(trackShape: const RectangularSliderTrackShape()),
+            child: Slider(
+              value: grouping, max: 10, divisions: 10,
+              onChanged: (v) {
+                setModalState(() => grouping = v);
+              },
+              onChangeEnd: (v) {
+                setState(() {
+                  grouping = v;
+                  widget.project.grouping = v;
+                });
+                _recalcPhases();
+                state.saveProject(widget.project);
+              },
+            ),
+          ),
+        ],
+      );
 
-            return SafeArea(
-              child: Padding(
-                padding: EdgeInsets.only(
-                  left: 16.0, right: 16.0, top: 16.0,
-                  bottom: MediaQuery.of(ctx).viewInsets.bottom + 8.0
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
+      return SafeArea(
+        child: Padding(
+          padding: EdgeInsets.only(
+            left: 16.0, right: 16.0, top: 16.0,
+            bottom: isRotatedFullscreen ? 16.0 : MediaQuery.of(ctx).viewInsets.bottom + 8.0
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Center(child: Text('Ρυθμίσεις', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
+              const Divider(),
+              if (isPortraitLayout) ...[
+                buildSensitivity(),
+                buildGrouping(),
+              ] else ...[
+                Row(
                   children: [
-                    const Center(child: Text('Ρυθμίσεις', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
-                    const Divider(),
-                    if (isPortrait) ...[
-                      buildSensitivity(),
-                      buildGrouping(),
-                    ] else ...[
-                      Row(
-                        children: [
-                          Expanded(child: buildSensitivity()),
-                          Expanded(child: buildGrouping()),
-                        ],
-                      ),
-                    ],
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Start Offset: ${startOffset.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                              SliderTheme(
-                                data: SliderTheme.of(ctx).copyWith(trackShape: const RectangularSliderTrackShape()),
-                                child: Slider(
-                                  value: startOffset, max: 10, divisions: 10,
-                                  onChanged: (v) {
-                                    setModalState(() => startOffset = v);
-                                    widget.project.startOffset = v;
-                                  },
-                                  onChangeEnd: (v) {
-                                    setState(() => startOffset = v);
-                                    state.saveProject(widget.project);
-                                  },
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('End Offset: ${endOffset.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                              SliderTheme(
-                                data: SliderTheme.of(ctx).copyWith(trackShape: const RectangularSliderTrackShape()),
-                                child: Slider(
-                                  value: endOffset, max: 10, divisions: 10,
-                                  onChanged: (v) {
-                                    setModalState(() => endOffset = v);
-                                    widget.project.endOffset = v;
-                                  },
-                                  onChangeEnd: (v) {
-                                    setState(() => endOffset = v);
-                                    state.saveProject(widget.project);
-                                  },
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        Row(
-                          children: [
-                            Checkbox(visualDensity: VisualDensity.compact, value: autoplay, onChanged: (v) {
-                              setModalState(() => autoplay = v ?? false);
-                              setState(() => autoplay = v ?? false);
-                              widget.project.autoplay = autoplay;
-                              state.saveProject(widget.project);
-                            }),
-                            const Text('Autoplay', style: TextStyle(fontSize: 12)),
-                          ],
-                        ),
-                        Row(
-                          children: [
-                            Checkbox(visualDensity: VisualDensity.compact, value: skipSeen, onChanged: (v) {
-                              setModalState(() => skipSeen = v ?? false);
-                              setState(() => skipSeen = v ?? false);
-                              widget.project.skipSeen = skipSeen;
-                              state.saveProject(widget.project);
-                            }),
-                          const Text('Skip Seen', style: TextStyle(fontSize: 12)),
-                          ],
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: const Text('OK'),
-                      ),
-                    ),
+                    Expanded(child: buildSensitivity()),
+                    Expanded(child: buildGrouping()),
                   ],
+                ),
+              ],
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Start Offset: ${startOffset.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                        SliderTheme(
+                          data: SliderTheme.of(ctx).copyWith(trackShape: const RectangularSliderTrackShape()),
+                          child: Slider(
+                            value: startOffset, max: 10, divisions: 10,
+                            onChanged: (v) {
+                              setModalState(() => startOffset = v);
+                            },
+                            onChangeEnd: (v) {
+                              setState(() {
+                                startOffset = v;
+                                widget.project.startOffset = v;
+                              });
+                              state.saveProject(widget.project);
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('End Offset: ${endOffset.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                        SliderTheme(
+                          data: SliderTheme.of(ctx).copyWith(trackShape: const RectangularSliderTrackShape()),
+                          child: Slider(
+                            value: endOffset, max: 10, divisions: 10,
+                            onChanged: (v) {
+                              setModalState(() => endOffset = v);
+                            },
+                            onChangeEnd: (v) {
+                              setState(() {
+                                endOffset = v;
+                                widget.project.endOffset = v;
+                              });
+                              state.saveProject(widget.project);
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  Row(
+                    children: [
+                      Checkbox(visualDensity: VisualDensity.compact, value: autoplay, onChanged: (v) {
+                        setModalState(() => autoplay = v ?? false);
+                        setState(() {
+                          autoplay = v ?? false;
+                          widget.project.autoplay = autoplay;
+                        });
+                        state.saveProject(widget.project);
+                      }),
+                      const Text('Autoplay', style: TextStyle(fontSize: 12)),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      Checkbox(visualDensity: VisualDensity.compact, value: skipSeen, onChanged: (v) {
+                        setModalState(() => skipSeen = v ?? false);
+                        setState(() {
+                          skipSeen = v ?? false;
+                          widget.project.skipSeen = skipSeen;
+                        });
+                        state.saveProject(widget.project);
+                      }),
+                    const Text('Skip Seen', style: TextStyle(fontSize: 12)),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('OK'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final bool isPortrait = MediaQuery.of(context).orientation == Orientation.portrait;
+
+    if (isRotatedFullscreen) {
+      // 1. Κατάσταση: Rotated Landscape (Το κινητό κάθετα, το UI γυρισμένο).
+      showDialog(
+        context: context,
+        builder: (ctx) => StatefulBuilder(
+          builder: (context, setModalState) {
+            return RotatedBox(
+              quarterTurns: uiTurns,
+              child: Dialog(
+                insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 24),
+                backgroundColor: Theme.of(ctx).canvasColor,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                child: SizedBox(
+                  width: MediaQuery.of(ctx).size.height,
+                  child: SingleChildScrollView(
+                    child: buildSettingsContent(ctx, setModalState, true),
+                  ),
                 ),
               ),
             );
           }
-        );
-      }
-    );
+        )
+      );
+    } else if (isFullscreen) {
+      // 2. Κατάσταση: True Landscape (Το κινητό κανονικά οριζόντια).
+      showDialog(
+        context: context,
+        builder: (ctx) => StatefulBuilder(
+          builder: (context, setModalState) {
+            return Dialog(
+              insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+              backgroundColor: Theme.of(ctx).canvasColor,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              child: SizedBox(
+                width: MediaQuery.of(ctx).size.width, // Απλώνεται στο φάρδος
+                child: SingleChildScrollView(
+                  child: buildSettingsContent(ctx, setModalState, false),
+                ),
+              ),
+            );
+          }
+        )
+      );
+    } else {
+      // 3. Κατάσταση: Κανονικό Portrait.
+      showDialog(
+        context: context,
+        builder: (ctx) => StatefulBuilder(
+          builder: (context, setModalState) {
+            return Dialog(
+              insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 24),
+              backgroundColor: Theme.of(ctx).canvasColor,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              child: SizedBox(
+                width: MediaQuery.of(ctx).size.width, // Απλώνεται στο φάρδος
+                child: SingleChildScrollView(
+                  child: buildSettingsContent(ctx, setModalState, true),
+                ),
+              ),
+            );
+          }
+        )
+      );
+    }
   }
 
   Widget _buildSidePanel(BuildContext context, AppState state) {
