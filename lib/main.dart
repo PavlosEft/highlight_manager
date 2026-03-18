@@ -2319,24 +2319,17 @@ class _EditorScreenState extends State<EditorScreen> {
 
   void _scrollToActivePhase() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_listScrollController.hasClients || currentPlayingPhase == null) return;
+      if (currentPlayingPhase == null) return;
       
-      final phases = _filteredPhases;
-      final int index = phases.indexOf(currentPlayingPhase!);
-      if (index < 0) return;
-      
-      // Σταθερό ύψος του Card (περίπου 56 pixels με τα margins/borders)
-      const double itemHeight = 56.0; 
-      final double viewportHeight = _listScrollController.position.viewportDimension;
-      
-      double targetOffset = (index * itemHeight) - (viewportHeight / 2) + (itemHeight / 2);
-      targetOffset = math.max(0.0, targetOffset);
-      
-      _listScrollController.animateTo(
-        targetOffset,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeInOut,
-      );
+      final context = GlobalObjectKey(currentPlayingPhase!).currentContext;
+      if (context != null) {
+        Scrollable.ensureVisible(
+          context,
+          duration: const Duration(milliseconds: 100),
+          curve: Curves.easeOut,
+          alignment: 0.5, // Απόλυτο κεντράρισμα ανεξαρτήτως ύψους
+        );
+      }
     });
   }
 
@@ -2748,24 +2741,25 @@ class _EditorScreenState extends State<EditorScreen> {
                 Positioned(
                   top: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 12 : 12) : 4,
                   right: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 16 : 12) : 4,
-                  child: Container(
-                    decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      child: const Padding(
-                        padding: EdgeInsets.all(12.0),
-                        child: Icon(Icons.screen_rotation, color: Colors.white70, size: 24),
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () {
+                      setState(() {
+                        if (isFullscreen) {
+                          widget.project.rotationPhaseLandscape = (widget.project.rotationPhaseLandscape + 1) % 4;
+                        } else {
+                          widget.project.rotationPhasePortrait = (widget.project.rotationPhasePortrait + 1) % 4;
+                        }
+                      });
+                      Provider.of<AppState>(context, listen: false).saveProject(widget.project);
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.all(12.0), // Τεράστιο αόρατο hitbox
+                      child: Container(
+                        padding: const EdgeInsets.all(6.0), // Μικρότερο οπτικό background
+                        decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
+                        child: const Icon(Icons.screen_rotation, color: Colors.white70, size: 20),
                       ),
-                      onTap: () {
-                        setState(() {
-                          if (isFullscreen) {
-                            widget.project.rotationPhaseLandscape = (widget.project.rotationPhaseLandscape + 1) % 4;
-                          } else {
-                            widget.project.rotationPhasePortrait = (widget.project.rotationPhasePortrait + 1) % 4;
-                          }
-                        });
-                        Provider.of<AppState>(context, listen: false).saveProject(widget.project);
-                      },
                     ),
                   ),
                 ),
@@ -2773,8 +2767,8 @@ class _EditorScreenState extends State<EditorScreen> {
                   bottom: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 56 : 40) : 16,
                   left: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 16 : 12) : 4,
                   child: Container(
-                    padding: EdgeInsets.symmetric(vertical: 6, horizontal: isFullscreen ? 4 : 2),
-                    decoration: BoxDecoration(color: Colors.black45, borderRadius: BorderRadius.circular(16)),
+                    padding: EdgeInsets.symmetric(vertical: 4, horizontal: isFullscreen ? 2 : 0),
+                    decoration: BoxDecoration(color: Colors.black38, borderRadius: BorderRadius.circular(16)),
                     child: StreamBuilder<double>(
                       stream: player.stream.volume,
                       initialData: player.state.volume,
@@ -2806,11 +2800,11 @@ class _EditorScreenState extends State<EditorScreen> {
                             ),
                             GestureDetector(
                               behavior: HitTestBehavior.opaque,
-                              child: Padding(
-                                padding: EdgeInsets.all(isFullscreen ? 10.0 : 6.0),
-                                child: Icon(vol == 0 ? Icons.volume_off : Icons.volume_up, color: Colors.grey.shade400, size: 24),
-                              ),
                               onTap: () => player.setVolume(vol == 0 ? 100.0 : 0.0),
+                              child: Padding(
+                                padding: EdgeInsets.all(isFullscreen ? 14.0 : 10.0), // Μεγαλύτερο hitbox
+                                child: Icon(vol == 0 ? Icons.volume_off : Icons.volume_up, color: Colors.grey.shade400, size: 20),
+                              ),
                             ),
                           ],
                         );
@@ -3467,7 +3461,7 @@ class _EditorScreenState extends State<EditorScreen> {
                     }
                     
                     Widget card = Card(
-                      key: ObjectKey(phase),
+                      key: GlobalObjectKey(phase),
                       elevation: 1,
                       color: bgColor,
                       margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
