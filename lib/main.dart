@@ -2706,25 +2706,26 @@ class _EditorScreenState extends State<EditorScreen> {
                     child: Stack(
                       children: [
                         Positioned(
-                          top: isFullscreen ? 16 : 4,
-                          left: isFullscreen ? 8 : 4,
+                          top: isFullscreen ? 32 : 12,
+                          left: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 64 : 32) : 8,
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                              color: Colors.black26,
+                              color: Colors.black38,
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 if (isFullscreen) ...[
-                                  IconButton(
-                                    icon: const Icon(Icons.settings, color: Colors.white70, size: 24, shadows: [Shadow(offset: Offset(-2, -2), color: Colors.black), Shadow(offset: Offset(2, -2), color: Colors.black), Shadow(offset: Offset(2, 2), color: Colors.black), Shadow(offset: Offset(-2, 2), color: Colors.black), Shadow(blurRadius: 8, color: Colors.black)]),
-                                    padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(),
-                                    onPressed: () => _showSettingsSheet(context, Provider.of<AppState>(context, listen: false)),
+                                  GestureDetector(
+                                    onTap: () => _showSettingsSheet(context, Provider.of<AppState>(context, listen: false)),
+                                    child: const Padding(
+                                      padding: EdgeInsets.all(2.0),
+                                      child: Icon(Icons.settings, color: Colors.white70, size: 22, shadows: [Shadow(offset: Offset(-2, -2), color: Colors.black), Shadow(offset: Offset(2, -2), color: Colors.black), Shadow(offset: Offset(2, 2), color: Colors.black), Shadow(offset: Offset(-2, 2), color: Colors.black), Shadow(blurRadius: 8, color: Colors.black)]),
+                                    ),
                                   ),
-                                  const SizedBox(width: 4),
+                                  const SizedBox(width: 6),
                                 ],
                                 Text(
                                   '${activePhaseIndex >= 0 ? activePhaseIndex + 1 : 0} / ${widget.project.phases.length}',
@@ -2739,13 +2740,17 @@ class _EditorScreenState extends State<EditorScreen> {
                           ),
                         ),
                 Positioned(
-                  top: isFullscreen ? 16 : 4,
-                  right: isFullscreen ? 8 : 4,
+                  top: isFullscreen ? 32 : 12,
+                  right: isFullscreen ? 32 : 8,
                   child: Container(
-                    decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(8)),
-                    child: IconButton(
-                      icon: const Icon(Icons.screen_rotation, color: Colors.white70, size: 24, shadows: [Shadow(offset: Offset(-2, -2), color: Colors.black), Shadow(offset: Offset(2, -2), color: Colors.black), Shadow(offset: Offset(2, 2), color: Colors.black), Shadow(offset: Offset(-2, 2), color: Colors.black), Shadow(blurRadius: 8, color: Colors.black)]),
-                      onPressed: () {
+                    padding: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(color: Colors.black38, borderRadius: BorderRadius.circular(8)),
+                    child: GestureDetector(
+                      child: const Padding(
+                        padding: EdgeInsets.all(2.0),
+                        child: Icon(Icons.screen_rotation, color: Colors.white70, size: 24, shadows: [Shadow(offset: Offset(-2, -2), color: Colors.black), Shadow(offset: Offset(2, -2), color: Colors.black), Shadow(offset: Offset(2, 2), color: Colors.black), Shadow(offset: Offset(-2, 2), color: Colors.black), Shadow(blurRadius: 8, color: Colors.black)]),
+                      ),
+                      onTap: () {
                         setState(() {
                           if (isFullscreen) {
                             widget.project.rotationPhaseLandscape = (widget.project.rotationPhaseLandscape + 1) % 4;
@@ -2759,11 +2764,11 @@ class _EditorScreenState extends State<EditorScreen> {
                   ),
                 ),
                 Positioned(
-                  bottom: isFullscreen ? 32 : 0,
-                  left: isFullscreen ? 16 : 0,
+                  bottom: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 32 : 64) : 12,
+                  left: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 64 : 32) : 8,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(8)),
+                    padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+                    decoration: BoxDecoration(color: Colors.black38, borderRadius: BorderRadius.circular(8)),
                     child: StreamBuilder<double>(
                       stream: player.stream.volume,
                       initialData: player.state.volume,
@@ -2793,11 +2798,12 @@ class _EditorScreenState extends State<EditorScreen> {
                                 ),
                               ),
                             ),
-                            IconButton(
-                              icon: Icon(vol == 0 ? Icons.volume_off : Icons.volume_up, color: Colors.grey.shade400, size: 24, shadows: const [Shadow(offset: Offset(-2, -2), color: Colors.black), Shadow(offset: Offset(2, -2), color: Colors.black), Shadow(offset: Offset(2, 2), color: Colors.black), Shadow(offset: Offset(-2, 2), color: Colors.black), Shadow(blurRadius: 8, color: Colors.black)]),
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
-                              onPressed: () => player.setVolume(vol == 0 ? 100.0 : 0.0),
+                            GestureDetector(
+                              child: Padding(
+                                padding: const EdgeInsets.all(2.0),
+                                child: Icon(vol == 0 ? Icons.volume_off : Icons.volume_up, color: Colors.grey.shade400, size: 24, shadows: const [Shadow(offset: Offset(-2, -2), color: Colors.black), Shadow(offset: Offset(2, -2), color: Colors.black), Shadow(offset: Offset(2, 2), color: Colors.black), Shadow(offset: Offset(-2, 2), color: Colors.black), Shadow(blurRadius: 8, color: Colors.black)]),
+                              ),
+                              onTap: () => player.setVolume(vol == 0 ? 100.0 : 0.0),
                             ),
                           ],
                         );
@@ -2806,11 +2812,11 @@ class _EditorScreenState extends State<EditorScreen> {
                   ),
                 ),
                 Positioned(
-                  bottom: isFullscreen ? 20 : 4,
-                  right: isFullscreen ? 16 : 8,
+                  bottom: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 32 : 64) : 12,
+                  right: isFullscreen ? 32 : 8,
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(8)),
+                    decoration: BoxDecoration(color: Colors.black38, borderRadius: BorderRadius.circular(8)),
                     child: Text(
                       '${_formatDuration(posDuration)} / ${_formatDuration(totalDur)}',
                       style: TextStyle(
@@ -2829,15 +2835,17 @@ class _EditorScreenState extends State<EditorScreen> {
                   ),
                 ),
                 Positioned(
-                  bottom: isFullscreen ? 44 : 22,
-                  right: isFullscreen ? 16 : 2,
+                  bottom: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 124 : 104) : 48,
+                  right: isFullscreen ? 32 : 8,
                   child: Container(
-                    decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(8)),
-                    child: IconButton(
-                      icon: Icon(isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen, color: Colors.grey.shade400, size: 28, shadows: const [Shadow(offset: Offset(-2, -2), color: Colors.black), Shadow(offset: Offset(2, -2), color: Colors.black), Shadow(offset: Offset(2, 2), color: Colors.black), Shadow(offset: Offset(-2, 2), color: Colors.black), Shadow(blurRadius: 8, color: Colors.black)]),
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                      onPressed: () {
+                    padding: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(color: Colors.black38, borderRadius: BorderRadius.circular(8)),
+                    child: GestureDetector(
+                      child: Padding(
+                        padding: const EdgeInsets.all(2.0),
+                        child: Icon(isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen, color: Colors.grey.shade400, size: 28, shadows: const [Shadow(offset: Offset(-2, -2), color: Colors.black), Shadow(offset: Offset(2, -2), color: Colors.black), Shadow(offset: Offset(2, 2), color: Colors.black), Shadow(offset: Offset(-2, 2), color: Colors.black), Shadow(blurRadius: 8, color: Colors.black)]),
+                      ),
+                      onTap: () {
                         setState(() {
                           isFullscreen = !isFullscreen;
                         });
