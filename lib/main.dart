@@ -2706,8 +2706,8 @@ class _EditorScreenState extends State<EditorScreen> {
                     child: Stack(
                       children: [
                         Positioned(
-                          top: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 24 : 12) : 4,
-                          left: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 48 : 12) : 4,
+                          top: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 12 : 12) : 4,
+                          left: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 16 : 12) : 4,
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                             decoration: BoxDecoration(
@@ -2740,8 +2740,8 @@ class _EditorScreenState extends State<EditorScreen> {
                           ),
                         ),
                 Positioned(
-                  top: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 24 : 12) : 4,
-                  right: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 48 : 12) : 4,
+                  top: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 12 : 12) : 4,
+                  right: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 16 : 12) : 4,
                   child: Container(
                     decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
                     child: GestureDetector(
@@ -2763,8 +2763,8 @@ class _EditorScreenState extends State<EditorScreen> {
                   ),
                 ),
                 Positioned(
-                  bottom: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 32 : 40) : 16,
-                  left: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 48 : 12) : 4,
+                  bottom: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 56 : 40) : 16,
+                  left: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 16 : 12) : 4,
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
                     decoration: BoxDecoration(color: Colors.black45, borderRadius: BorderRadius.circular(16)),
@@ -2812,7 +2812,7 @@ class _EditorScreenState extends State<EditorScreen> {
                 ),
                 Positioned(
                   bottom: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 32 : 40) : 2,
-                  right: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 48 : 12) : 4,
+                  right: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 16 : 12) : 4,
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.end,
@@ -2857,8 +2857,8 @@ class _EditorScreenState extends State<EditorScreen> {
                 if (isFullscreen)
                   Positioned(
                     bottom: 0,
-                    left: 0,
-                    right: 0,
+                    left: (widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 0 : 16,
+                    right: (widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 0 : 16,
                     child: SliderTheme(
                       data: SliderTheme.of(context).copyWith(
                         trackHeight: 6.0,
