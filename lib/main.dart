@@ -3116,6 +3116,7 @@ class _EditorScreenState extends State<EditorScreen> {
       mainAxisSize: MainAxisSize.min,
       children: [
         videoContainer,
+        const SizedBox(height: 16),
         // Γραμμή 1: Slider
         SizedBox(
           height: 12,
@@ -3166,6 +3167,7 @@ class _EditorScreenState extends State<EditorScreen> {
             }
           ),
         ),
+        const SizedBox(height: 12),
         // Γραμμή 2: Κουμπιά (Συμπαγή & Οβάλ Play)
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 2.0),
@@ -3258,6 +3260,7 @@ class _EditorScreenState extends State<EditorScreen> {
             ],
           ),
         ),
+        const SizedBox(height: 16),
       ],
     );
   }
