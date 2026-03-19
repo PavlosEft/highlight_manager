@@ -178,6 +178,15 @@ const Map<String, Map<String, String>> translations = {
     'manual_add': 'Χειροκίνητη Προσθήκη',
     'pool_tab': 'Ανιχνευμένα',
     'high_tab': 'Highlights',
+    'preparation': 'Προετοιμασία',
+    'analysis_step': 'Ανάλυση {i}/{total}...',
+    'time_label': 'Χρόνος',
+    'progress_label': 'Πρόοδος',
+    'eta_label': 'Εκτίμηση',
+    'cancel_analysis': 'ΑΚΥΡΩΣΗ',
+    'cancelling': 'ΑΚΥΡΩΝΕΤΑΙ...',
+    'cancel_confirm_title': 'Ακύρωση Ανάλυσης',
+    'cancel_confirm_msg': 'Είστε σίγουροι ότι θέλετε να διακόψετε την ανάλυση;',
   },
   'en': {
     'title': 'Highlight Manager',
@@ -210,6 +219,15 @@ const Map<String, Map<String, String>> translations = {
     'manual_add': 'Manual Add',
     'pool_tab': 'Detected',
     'high_tab': 'Highlights',
+    'preparation': 'Preparation',
+    'analysis_step': 'Analysis {i}/{total}...',
+    'time_label': 'Time',
+    'progress_label': 'Progress',
+    'eta_label': 'ETA',
+    'cancel_analysis': 'CANCEL',
+    'cancelling': 'CANCELLING...',
+    'cancel_confirm_title': 'Cancel Analysis',
+    'cancel_confirm_msg': 'Are you sure you want to cancel the analysis?',
   }
 };
 
@@ -495,7 +513,7 @@ class AppState extends ChangeNotifier {
         if (_isAnalysisCancelled) throw Exception('Cancelled');
         
         String path = paths[i];
-        onStatusUpdate("Υπολογισμός διάρκειας ${i + 1}/${paths.length}...", 0.0);
+        onStatusUpdate(t('analysis_step').replaceAll('{i}', '${i + 1}').replaceAll('{total}', '${paths.length}'), 0.0);
         
         double dur = 0.0;
         final tempPlayer = Player();
@@ -547,7 +565,7 @@ class AppState extends ChangeNotifier {
               
               if (currentRms.length % 50 == 0) {
                 double globalProgress = (cumulativeTime + currentTime) / totalDur;
-                onStatusUpdate("Ανάλυση Ήχου ${i + 1}/${paths.length}...", globalProgress.clamp(0.0, 0.99));
+                onStatusUpdate(t('analysis_step').replaceAll('{i}', '${i + 1}').replaceAll('{total}', '${paths.length}'), globalProgress.clamp(0.0, 0.99));
               }
             }
           }
@@ -626,7 +644,7 @@ class AppState extends ChangeNotifier {
 
       print('[ANALYZE] Συνολική Ανάλυση Ήχου ολοκληρώθηκε σε ${stepStopwatch.elapsedMilliseconds}ms');
       print('[TELEMETRY] Συνολικές γραμμές logs που επεξεργάστηκαν: $totalLines');
-      onStatusUpdate("Αποθήκευση δεδομένων...", 1.0);
+      onStatusUpdate(t('analysis_step').replaceAll('{i}', '${paths.length}').replaceAll('{total}', '${paths.length}'), 1.0);
       stepStopwatch.reset();
       
       double sumRms = 0.0;
@@ -650,7 +668,7 @@ class AppState extends ChangeNotifier {
       await analysisFile.writeAsString(jsonEncode(analysisData));
       print('[TELEMETRY] Χρόνος εγγραφής JSON στο δίσκο: ${stepStopwatch.elapsedMilliseconds}ms');
 
-      onStatusUpdate("Δημιουργία μικρογραφιών...", 0.95);
+      onStatusUpdate(t('analysis_step').replaceAll('{i}', '${paths.length}').replaceAll('{total}', '${paths.length}'), 0.95);
       try {
         List<Map<String, dynamic>> extractTasks = [];
         if (paths.length >= 4) {
@@ -917,7 +935,7 @@ class ProcessingDialog extends StatefulWidget {
 }
 
 class _ProcessingDialogState extends State<ProcessingDialog> {
-  String status = "Προετοιμασία...";
+  late String status;
   double progress = 0.0;
   bool isCancelled = false;
   DateTime? startTime;
@@ -936,6 +954,7 @@ class _ProcessingDialogState extends State<ProcessingDialog> {
   @override
   void initState() {
     super.initState();
+    status = widget.state.t('preparation');
     startTime = DateTime.now();
     timer = Timer.periodic(const Duration(seconds: 1), (t) {
       if (mounted && startTime != null && !isCancelled && progress < 1.0) {
@@ -983,41 +1002,44 @@ class _ProcessingDialogState extends State<ProcessingDialog> {
   Widget build(BuildContext context) {
     final isDesktop = MediaQuery.of(context).size.width > 600;
     return AlertDialog(
-      insetPadding: isDesktop ? const EdgeInsets.symmetric(horizontal: 40.0, vertical: 24.0) : EdgeInsets.zero,
-      shape: isDesktop ? null : const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-      title: const FittedBox(
+      insetPadding: isDesktop ? const EdgeInsets.symmetric(horizontal: 40.0, vertical: 24.0) : const EdgeInsets.symmetric(horizontal: 24.0, vertical: 24.0),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: FittedBox(
         fit: BoxFit.scaleDown,
         alignment: Alignment.centerLeft,
-        child: Text('Επεξεργασία', style: TextStyle(fontWeight: FontWeight.bold)),
+        child: Text(widget.state.t('preparation'), style: const TextStyle(fontWeight: FontWeight.bold)),
       ),
       content: SizedBox(
         width: isDesktop ? 400 : MediaQuery.of(context).size.width,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            LinearProgressIndicator(value: progress > 0 ? progress : null),
-            const SizedBox(height: 16),
-            Text(status, textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 16),
+            LinearProgressIndicator(value: progress > 0 ? progress : null, minHeight: 6, borderRadius: BorderRadius.circular(4)),
+            const SizedBox(height: 20),
+            Text(status, textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            const SizedBox(height: 24),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
                 Column(
                   children: [
-                    const Text('Χρόνος', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                    Text(elapsedTimeStr, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    Text(widget.state.t('time_label'), style: const TextStyle(fontSize: 14, color: Colors.grey)),
+                    const SizedBox(height: 4),
+                    Text(elapsedTimeStr, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                   ],
                 ),
                 Column(
                   children: [
-                    const Text('Πρόοδος', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                    Text('${(progress * 100).toStringAsFixed(1)}%', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    Text(widget.state.t('progress_label'), style: const TextStyle(fontSize: 14, color: Colors.grey)),
+                    const SizedBox(height: 4),
+                    Text('${(progress * 100).toStringAsFixed(1)}%', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                   ],
                 ),
                 Column(
                   children: [
-                    const Text('Εκτίμηση', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                    Text(etaStr, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    Text(widget.state.t('eta_label'), style: const TextStyle(fontSize: 14, color: Colors.grey)),
+                    const SizedBox(height: 4),
+                    Text(etaStr, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                   ],
                 ),
               ],
@@ -1027,14 +1049,31 @@ class _ProcessingDialogState extends State<ProcessingDialog> {
       ),
       actions: [
         TextButton(
-          onPressed: isCancelled ? null : () {
-            setState(() {
-              isCancelled = true;
-              status = "Ακύρωση... παρακαλώ περιμένετε";
-            });
-            widget.state.cancelAnalysis();
+          onPressed: isCancelled ? null : () async {
+            bool? confirm = await showDialog<bool>(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                title: Text(widget.state.t('cancel_confirm_title'), style: const TextStyle(fontWeight: FontWeight.bold)),
+                content: Text(widget.state.t('cancel_confirm_msg')),
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(widget.state.t('no'))),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+                    child: Text(widget.state.t('yes')),
+                  ),
+                ],
+              ),
+            );
+            if (confirm == true && mounted) {
+              setState(() {
+                isCancelled = true;
+                status = widget.state.t('cancelling');
+              });
+              widget.state.cancelAnalysis();
+            }
           },
-          child: Text(isCancelled ? 'ΑΚΥΡΩΝΕΤΑΙ...' : 'ΑΚΥΡΩΣΗ', style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+          child: Text(isCancelled ? widget.state.t('cancelling') : widget.state.t('cancel_analysis'), style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 16)),
         ),
       ],
     );
@@ -2153,7 +2192,7 @@ class _EditorScreenState extends State<EditorScreen> {
         
         if (autoplay && !isAutoplaySuspended) {
           _navigate(1, isAuto: true);
-        } else if (currentPlayingPhase!.isHighlight && isTrackingPhase) {
+        } else if (showHighlightsOnly && currentPlayingPhase!.isHighlight && isTrackingPhase) {
           player.pause();
         }
       }
@@ -3021,29 +3060,42 @@ class _EditorScreenState extends State<EditorScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              IconButton(
-                icon: const Icon(Icons.star_border, color: Colors.amber, size: 24),
-                onPressed: _triggerStarFeedback,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
+              InkWell(
+                onTap: () => _showSettingsSheet(context, Provider.of<AppState>(context, listen: false)),
+                customBorder: const CircleBorder(),
+                child: Container(
+                  padding: const EdgeInsets.all(8.0),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(Icons.settings, color: Theme.of(context).colorScheme.onSurfaceVariant, size: 24),
+                ),
               ),
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
-                      IconButton(
-                        icon: Icon(Icons.skip_previous, color: Theme.of(context).colorScheme.primary, size: 28),
-                        onPressed: () => _navigate(-1),
-                        padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                        constraints: const BoxConstraints(),
+                      GestureDetector(
+                        onTap: () => _navigate(-1),
+                        onLongPressStart: (_) => _startSeeking(false),
+                        onLongPressEnd: (_) => _stopSeeking(),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 6.0),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.4),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Icon(Icons.fast_rewind, color: Theme.of(context).colorScheme.primary, size: 28),
+                        ),
                       ),
                       InkWell(
                         onTap: () => player.playOrPause(),
                         borderRadius: BorderRadius.circular(16),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
                           decoration: BoxDecoration(
                             color: Theme.of(context).colorScheme.primaryContainer,
                             borderRadius: BorderRadius.circular(16),
@@ -3051,21 +3103,34 @@ class _EditorScreenState extends State<EditorScreen> {
                           child: Icon(isPlaying ? Icons.pause : Icons.play_arrow, color: Theme.of(context).colorScheme.onPrimaryContainer, size: 28),
                         ),
                       ),
-                      IconButton(
-                        icon: Icon(Icons.skip_next, color: Theme.of(context).colorScheme.primary, size: 28),
-                        onPressed: () => _navigate(1),
-                        padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                        constraints: const BoxConstraints(),
+                      GestureDetector(
+                        onTap: () => _navigate(1),
+                        onLongPressStart: (_) => _startSeeking(true),
+                        onLongPressEnd: (_) => _stopSeeking(),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 6.0),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.4),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Icon(Icons.fast_forward, color: Theme.of(context).colorScheme.primary, size: 28),
+                        ),
                       ),
                     ],
                   ),
-                ],
+                ),
               ),
-              IconButton(
-                icon: Icon(Icons.settings, color: Theme.of(context).colorScheme.onSurfaceVariant, size: 24),
-                onPressed: () => _showSettingsSheet(context, Provider.of<AppState>(context, listen: false)),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
+              InkWell(
+                onTap: _triggerStarFeedback,
+                customBorder: const CircleBorder(),
+                child: Container(
+                  padding: const EdgeInsets.all(8.0),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.star_border, color: Colors.amber, size: 24),
+                ),
               ),
             ],
           ),
@@ -3074,32 +3139,57 @@ class _EditorScreenState extends State<EditorScreen> {
     );
   }
 
-  void _showSettingsSheet(BuildContext context, AppState state) {
+  void _showSettingsSheet(BuildContext context, AppState state) async {
     int uiTurns = 0;
     if (isFullscreen) {
       if (widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) uiTurns = 3;
     }
     final bool isRotatedFullscreen = uiTurns != 0;
     
+    double tempSensitivity = sensitivity;
+    double tempGrouping = grouping;
+    
+    int calculatePreviewCount() {
+      if (rmsData.isEmpty) return widget.project.phases.length;
+      double level = maxRms - (tempSensitivity / 100.0) * (maxRms - avgRms);
+      List<double> rawTimes = [];
+      for (int i = 0; i < rmsData.length; i++) {
+        if (rmsData[i] > level) rawTimes.add(timesData[i]);
+      }
+      List<double> grouped = [];
+      if (rawTimes.isNotEmpty) {
+        grouped.add(rawTimes[0]);
+        for (int i = 1; i < rawTimes.length; i++) {
+          if (rawTimes[i] - grouped.last > tempGrouping) {
+            grouped.add(rawTimes[i]);
+          }
+        }
+      }
+      int explicitCount = widget.project.phases.where((p) => p.isHighlight).length;
+      int newCount = 0;
+      for (double t in grouped) {
+        bool isAlreadyHighlight = widget.project.phases.any((p) => p.isHighlight && (p.timestamp - t).abs() < 0.5);
+        if (!isAlreadyHighlight) newCount++;
+      }
+      return explicitCount + newCount;
+    }
+
+    int previewCount = widget.project.phases.length;
+
     Widget buildSettingsContent(BuildContext ctx, StateSetter setModalState, bool isPortraitLayout) {
       Widget buildSensitivity() => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Ευαισθησία: ${sensitivity.toInt()}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+          Text('Ευαισθησία: ${tempSensitivity.toInt()}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
           SliderTheme(
             data: SliderTheme.of(ctx).copyWith(trackShape: const RectangularSliderTrackShape()),
             child: Slider(
-              value: sensitivity, max: 100,
+              value: tempSensitivity, max: 100,
               onChanged: (v) {
-                setModalState(() => sensitivity = v);
-              },
-              onChangeEnd: (v) {
-                setState(() {
-                  sensitivity = v;
-                  widget.project.sensitivity = v;
+                setModalState(() {
+                  tempSensitivity = v;
+                  previewCount = calculatePreviewCount();
                 });
-                _recalcPhases();
-                state.saveProject(widget.project);
               },
             ),
           ),
@@ -3109,21 +3199,16 @@ class _EditorScreenState extends State<EditorScreen> {
       Widget buildGrouping() => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Ομαδοποίηση: ${grouping.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+          Text('Ομαδοποίηση: ${tempGrouping.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
           SliderTheme(
             data: SliderTheme.of(ctx).copyWith(trackShape: const RectangularSliderTrackShape()),
             child: Slider(
-              value: grouping, max: 10, divisions: 10,
+              value: tempGrouping, max: 10, divisions: 10,
               onChanged: (v) {
-                setModalState(() => grouping = v);
-              },
-              onChangeEnd: (v) {
-                setState(() {
-                  grouping = v;
-                  widget.project.grouping = v;
+                setModalState(() {
+                  tempGrouping = v;
+                  previewCount = calculatePreviewCount();
                 });
-                _recalcPhases();
-                state.saveProject(widget.project);
               },
             ),
           ),
@@ -3140,7 +3225,33 @@ class _EditorScreenState extends State<EditorScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Center(child: Text('Ρυθμίσεις', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
+              Stack(
+                alignment: Alignment.center,
+                children: [
+                  const Center(child: Text('Ρυθμίσεις', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
+                  Positioned(
+                    right: 0,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Theme.of(ctx).colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.movie_filter_outlined, size: 16, color: Colors.grey),
+                          const SizedBox(width: 4),
+                          Text(
+                            '$previewCount',
+                            style: const TextStyle(color: Color(0xFF900020), fontWeight: FontWeight.bold, fontSize: 16),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
               const Divider(),
               if (isPortraitLayout) ...[
                 buildSensitivity(),
@@ -3252,9 +3363,12 @@ class _EditorScreenState extends State<EditorScreen> {
 
     final bool isPortrait = MediaQuery.of(context).orientation == Orientation.portrait;
 
+    final initialSensitivity = sensitivity;
+    final initialGrouping = grouping;
+
     if (isRotatedFullscreen) {
       // 1. Κατάσταση: Rotated Landscape (Το κινητό κάθετα, το UI γυρισμένο).
-      showDialog(
+      await showDialog(
         context: context,
         builder: (ctx) => StatefulBuilder(
           builder: (context, setModalState) {
@@ -3277,7 +3391,7 @@ class _EditorScreenState extends State<EditorScreen> {
       );
     } else if (isFullscreen) {
       // 2. Κατάσταση: True Landscape (Το κινητό κανονικά οριζόντια).
-      showDialog(
+      await showDialog(
         context: context,
         builder: (ctx) => StatefulBuilder(
           builder: (context, setModalState) {
@@ -3297,7 +3411,7 @@ class _EditorScreenState extends State<EditorScreen> {
       );
     } else {
       // 3. Κατάσταση: Κανονικό Portrait.
-      showDialog(
+      await showDialog(
         context: context,
         builder: (ctx) => StatefulBuilder(
           builder: (context, setModalState) {
@@ -3315,6 +3429,19 @@ class _EditorScreenState extends State<EditorScreen> {
           }
         )
       );
+    }
+
+    if (tempSensitivity != initialSensitivity || tempGrouping != initialGrouping) {
+      if (mounted) {
+        setState(() {
+          sensitivity = tempSensitivity;
+          grouping = tempGrouping;
+          widget.project.sensitivity = tempSensitivity;
+          widget.project.grouping = tempGrouping;
+        });
+        _recalcPhases();
+        state.saveProject(widget.project);
+      }
     }
   }
 
@@ -3352,11 +3479,20 @@ class _EditorScreenState extends State<EditorScreen> {
                 },
                 borderRadius: BorderRadius.circular(8),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
                     color: showHighlightsOnly ? Theme.of(context).colorScheme.primaryContainer : Colors.transparent,
-                    border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+                    border: Border.all(color: showHighlightsOnly ? Theme.of(context).colorScheme.primary : Colors.grey.shade500, width: 2.0),
                     borderRadius: BorderRadius.circular(8),
+                    boxShadow: showHighlightsOnly 
+                        ? [
+                            BoxShadow(
+                              color: Theme.of(context).brightness == Brightness.light ? Colors.black87 : Colors.white54,
+                              spreadRadius: 1.5,
+                              blurRadius: 0,
+                            )
+                          ]
+                        : null,
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
