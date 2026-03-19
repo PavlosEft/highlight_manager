@@ -310,7 +310,7 @@ class AppState extends ChangeNotifier {
   List<Project> projects = [];
   bool isLoading = true;
   String currentLang = 'en';
-  bool isDarkMode = false;
+  bool isDarkMode = true;
   String appDirPath = '';
 
   String t(String key) => translations[currentLang]?[key] ?? key;
@@ -342,7 +342,7 @@ class AppState extends ChangeNotifier {
   Future<void> _initApp() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      isDarkMode = prefs.getBool('isDarkMode') ?? false;
+      isDarkMode = prefs.getBool('isDarkMode') ?? true;
       final directory = await getApplicationDocumentsDirectory();
       appDirPath = '${directory.path}/HighlightManager';
     } catch (_) {}
@@ -2184,27 +2184,20 @@ class _EditorScreenState extends State<EditorScreen> {
       });
 
       if (isPlaying && !isSeeking) {
-        HighlightPhase? currentAutoPhase;
+        bool isCurrentlyInHighlight = false;
         for (var phase in widget.project.phases) {
           if (phase.isHighlight) {
             double start = math.max(0.0, phase.timestamp - (phase.customStartOffset ?? startOffset));
             double end = phase.timestamp + (phase.customEndOffset ?? endOffset);
             if (currentGlobalSec >= start && currentGlobalSec <= end) {
-              currentAutoPhase = phase;
+              isCurrentlyInHighlight = true;
               break;
             }
           }
         }
         
-        if (currentAutoPhase != null && currentAutoPhase != _lastAutoStarPhase) {
-          _lastAutoStarPhase = currentAutoPhase;
-          setState(() => _autoStarFeedback = true);
-          _autoStarTimer?.cancel();
-          _autoStarTimer = Timer(const Duration(milliseconds: 1500), () {
-            if (mounted) setState(() => _autoStarFeedback = false);
-          });
-        } else if (currentAutoPhase == null) {
-          _lastAutoStarPhase = null;
+        if (_autoStarFeedback != isCurrentlyInHighlight) {
+          setState(() => _autoStarFeedback = isCurrentlyInHighlight);
         }
       }
 
@@ -2691,6 +2684,17 @@ class _EditorScreenState extends State<EditorScreen> {
 
     Widget videoContainer = GestureDetector(
           behavior: HitTestBehavior.opaque,
+          onDoubleTapDown: (details) {
+            final width = MediaQuery.of(context).size.width;
+            final x = details.localPosition.dx;
+            if (x < width * 0.3) {
+              double target = (globalPositionSeconds - 5.0).clamp(0.0, widget.project.totalDuration);
+              _seekGlobal(target);
+            } else if (x > width * 0.7) {
+              double target = (globalPositionSeconds + 5.0).clamp(0.0, widget.project.totalDuration);
+              _seekGlobal(target);
+            }
+          },
           onTapUp: (details) {
             final width = MediaQuery.of(context).size.width;
             final x = details.localPosition.dx;
@@ -2994,26 +2998,32 @@ class _EditorScreenState extends State<EditorScreen> {
                     ),
                   ),
                 if (_showStarFeedback || _autoStarFeedback)
-                  Center(
-                    child: TweenAnimationBuilder<double>(
-                      key: ValueKey(_showStarFeedback),
-                      tween: Tween<double>(begin: 0.5, end: 1.5),
-                      duration: const Duration(milliseconds: 300),
-                      curve: Curves.elasticOut,
-                      builder: (context, scale, child) {
-                        return Transform.scale(
-                          scale: scale,
-                          child: Opacity(
-                            opacity: 0.8,
-                            child: Icon(
-                              _showStarFeedback ? Icons.star : Icons.star_border, 
-                              color: Colors.amber, 
-                              size: 100
-                            ),
-                          ),
-                        );
-                      },
-                    ),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final double minSize = math.min(constraints.maxWidth, constraints.maxHeight);
+                      final double starSize = minSize * 0.75; // 75% της μικρότερης διάστασης
+                      return Center(
+                        child: TweenAnimationBuilder<double>(
+                          key: ValueKey('star_$_showStarFeedback'),
+                          tween: Tween<double>(begin: _showStarFeedback ? 0.4 : 1.0, end: 1.0),
+                          duration: Duration(milliseconds: _showStarFeedback ? 300 : 0),
+                          curve: Curves.elasticOut,
+                          builder: (context, scale, child) {
+                            return Transform.scale(
+                              scale: scale,
+                              child: Opacity(
+                                opacity: _showStarFeedback ? 0.8 : 0.35, // Πιο λεπτό/αχνό το άδειο αστεράκι
+                                child: Icon(
+                                  _showStarFeedback ? Icons.star : Icons.star_border,
+                                  color: Colors.amber,
+                                  size: starSize,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      );
+                    },
                   ),
                       ],
                     ),
@@ -3112,6 +3122,10 @@ class _EditorScreenState extends State<EditorScreen> {
                     children: [
                       GestureDetector(
                         onTap: () => _navigate(-1),
+                        onDoubleTap: () {
+                          double target = (globalPositionSeconds - 5.0).clamp(0.0, widget.project.totalDuration);
+                          _seekGlobal(target);
+                        },
                         onLongPressStart: (_) => _startSeeking(false),
                         onLongPressEnd: (_) => _stopSeeking(),
                         child: Container(
@@ -3137,6 +3151,10 @@ class _EditorScreenState extends State<EditorScreen> {
                       ),
                       GestureDetector(
                         onTap: () => _navigate(1),
+                        onDoubleTap: () {
+                          double target = (globalPositionSeconds + 5.0).clamp(0.0, widget.project.totalDuration);
+                          _seekGlobal(target);
+                        },
                         onLongPressStart: (_) => _startSeeking(true),
                         onLongPressEnd: (_) => _stopSeeking(),
                         child: Container(
