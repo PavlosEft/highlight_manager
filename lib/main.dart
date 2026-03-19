@@ -2183,6 +2183,31 @@ class _EditorScreenState extends State<EditorScreen> {
         globalPositionSeconds = currentGlobalSec;
       });
 
+      if (isPlaying && !isSeeking) {
+        HighlightPhase? currentAutoPhase;
+        for (var phase in widget.project.phases) {
+          if (phase.isHighlight) {
+            double start = math.max(0.0, phase.timestamp - (phase.customStartOffset ?? startOffset));
+            double end = phase.timestamp + (phase.customEndOffset ?? endOffset);
+            if (currentGlobalSec >= start && currentGlobalSec <= end) {
+              currentAutoPhase = phase;
+              break;
+            }
+          }
+        }
+        
+        if (currentAutoPhase != null && currentAutoPhase != _lastAutoStarPhase) {
+          _lastAutoStarPhase = currentAutoPhase;
+          setState(() => _autoStarFeedback = true);
+          _autoStarTimer?.cancel();
+          _autoStarTimer = Timer(const Duration(milliseconds: 1500), () {
+            if (mounted) setState(() => _autoStarFeedback = false);
+          });
+        } else if (currentAutoPhase == null) {
+          _lastAutoStarPhase = null;
+        }
+      }
+
       if (!isPlaying || currentPlayingPhase == null || !isTrackingPhase || isSeeking) return;
       
       final targetEnd = currentPlayingPhase!.timestamp + (currentPlayingPhase!.customEndOffset ?? endOffset);
@@ -2478,9 +2503,6 @@ class _EditorScreenState extends State<EditorScreen> {
     });
     
     state.saveProject(widget.project);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Προστέθηκε highlight στο ${currentPos.toStringAsFixed(1)}s')),
-    );
   }
 
   bool _areAllHighlightsSelected() {
@@ -2646,11 +2668,14 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   bool _showStarFeedback = false;
+  bool _autoStarFeedback = false;
+  HighlightPhase? _lastAutoStarPhase;
+  Timer? _autoStarTimer;
 
   void _triggerStarFeedback() {
     _addManualHighlight();
     setState(() => _showStarFeedback = true);
-    Future.delayed(const Duration(milliseconds: 600), () {
+    Future.delayed(const Duration(milliseconds: 1500), () {
       if (mounted) setState(() => _showStarFeedback = false);
     });
   }
@@ -2678,7 +2703,7 @@ class _EditorScreenState extends State<EditorScreen> {
             }
           },
           onPanEnd: (details) {
-            if (details.velocity.pixelsPerSecond.dx > 300) {
+            if (details.velocity.pixelsPerSecond.dx > 100) {
               _triggerStarFeedback();
             }
           },
@@ -2968,20 +2993,27 @@ class _EditorScreenState extends State<EditorScreen> {
                       ),
                     ),
                   ),
-                if (_showStarFeedback)
-                  TweenAnimationBuilder<double>(
-                    tween: Tween<double>(begin: 0.5, end: 1.5),
-                    duration: const Duration(milliseconds: 300),
-                    curve: Curves.elasticOut,
-                    builder: (context, scale, child) {
-                      return Transform.scale(
-                        scale: scale,
-                        child: Opacity(
-                          opacity: 0.8,
-                          child: const Icon(Icons.star, color: Colors.amber, size: 100),
-                        ),
-                      );
-                    },
+                if (_showStarFeedback || _autoStarFeedback)
+                  Center(
+                    child: TweenAnimationBuilder<double>(
+                      key: ValueKey(_showStarFeedback),
+                      tween: Tween<double>(begin: 0.5, end: 1.5),
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.elasticOut,
+                      builder: (context, scale, child) {
+                        return Transform.scale(
+                          scale: scale,
+                          child: Opacity(
+                            opacity: 0.8,
+                            child: Icon(
+                              _showStarFeedback ? Icons.star : Icons.star_border, 
+                              color: Colors.amber, 
+                              size: 100
+                            ),
+                          ),
+                        );
+                      },
+                    ),
                   ),
                       ],
                     ),
@@ -3473,9 +3505,54 @@ class _EditorScreenState extends State<EditorScreen> {
               ],
               InkWell(
                 onTap: () {
-                  setState(() => showHighlightsOnly = !showHighlightsOnly);
-                  widget.project.showHighlightsOnly = showHighlightsOnly;
+                  bool phaseChanged = false;
+                  int targetIndex = -1;
+                  List<HighlightPhase> targetPhases = [];
+
+                  setState(() {
+                    showHighlightsOnly = !showHighlightsOnly;
+                    widget.project.showHighlightsOnly = showHighlightsOnly;
+                    
+                    targetPhases = showHighlightsOnly 
+                        ? widget.project.phases.where((p) => p.isHighlight).toList()
+                        : widget.project.phases.toList()..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
+                    if (currentPlayingPhase != null) {
+                      if (targetPhases.isEmpty) {
+                         activePhaseIndex = -1;
+                      } else {
+                         int newIndex = targetPhases.indexOf(currentPlayingPhase!);
+                         if (newIndex != -1) {
+                            activePhaseIndex = newIndex;
+                         } else {
+                            HighlightPhase? closestPhase;
+                            double minDiff = double.infinity;
+                            
+                            for (var p in targetPhases) {
+                               double diff = (p.timestamp - currentPlayingPhase!.timestamp).abs();
+                               if (diff < minDiff) {
+                                  minDiff = diff;
+                                  closestPhase = p;
+                               } else if (diff == minDiff && closestPhase != null) {
+                                  if (p.timestamp < closestPhase!.timestamp) {
+                                      closestPhase = p;
+                                  }
+                               }
+                            }
+                            
+                            if (closestPhase != null) {
+                               targetIndex = targetPhases.indexOf(closestPhase);
+                               phaseChanged = true;
+                            }
+                         }
+                      }
+                    }
+                  });
                   state.saveProject(widget.project);
+
+                  if (phaseChanged && targetIndex != -1) {
+                     _playPhase(targetIndex, targetPhases, recordHistory: false);
+                  }
                 },
                 borderRadius: BorderRadius.circular(8),
                 child: Container(
@@ -3519,7 +3596,7 @@ class _EditorScreenState extends State<EditorScreen> {
                     children: [
                       TextSpan(text: '${activePhaseIndex >= 0 ? activePhaseIndex + 1 : 0} ', style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.normal)),
                       const TextSpan(text: '/ ', style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
-                      TextSpan(text: '${widget.project.phases.length}', style: const TextStyle(color: Color(0xFF900020), fontWeight: FontWeight.bold)),
+                      TextSpan(text: '${phases.length}', style: TextStyle(color: showHighlightsOnly ? Colors.amber : const Color(0xFF900020), fontWeight: FontWeight.bold)),
                     ]
                   )
                 ),
