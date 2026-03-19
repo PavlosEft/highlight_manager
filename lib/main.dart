@@ -2706,69 +2706,79 @@ class _EditorScreenState extends State<EditorScreen> {
                         Positioned(
                           top: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 12 : 12) : 4,
                           left: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 16 : 12) : 4,
-                          child: Container(
-                            padding: EdgeInsets.only(left: isFullscreen ? 2 : 8, right: 8, top: 4, bottom: 4),
-                            decoration: BoxDecoration(
-                              color: Colors.black45,
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                if (isFullscreen) ...[
-                                  GestureDetector(
-                                    behavior: HitTestBehavior.opaque,
-                                    onTap: () => _showSettingsSheet(context, Provider.of<AppState>(context, listen: false)),
-                                    child: const Padding(
-                                      padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-                                      child: Icon(Icons.settings, color: Colors.white70, size: 24),
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () {
+                              if (isFullscreen) _showSettingsSheet(context, Provider.of<AppState>(context, listen: false));
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.black45,
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (isFullscreen) ...[
+                                    const Padding(
+                                      padding: EdgeInsets.all(2.0),
+                                      child: Icon(Icons.settings, color: Colors.white70, size: 22),
+                                    ),
+                                    const SizedBox(width: 6),
+                                  ],
+                                  Text(
+                                    '${activePhaseIndex >= 0 ? activePhaseIndex + 1 : 0} / ${widget.project.phases.length}',
+                                    style: TextStyle(
+                                      fontSize: isFullscreen ? 14 : 12,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white70,
                                     ),
                                   ),
-                                  const SizedBox(width: 2),
                                 ],
-                                Text(
-                                  '${activePhaseIndex >= 0 ? activePhaseIndex + 1 : 0} / ${widget.project.phases.length}',
-                                  style: TextStyle(
-                                    fontSize: isFullscreen ? 14 : 12,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white70,
-                                  ),
-                                ),
-                              ],
+                              ),
                             ),
                           ),
                         ),
                 Positioned(
                   top: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 12 : 12) : 4,
                   right: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 16 : 12) : 4,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () {
-                      setState(() {
-                        if (isFullscreen) {
-                          widget.project.rotationPhaseLandscape = (widget.project.rotationPhaseLandscape + 1) % 4;
-                        } else {
-                          widget.project.rotationPhasePortrait = (widget.project.rotationPhasePortrait + 1) % 4;
-                        }
-                      });
-                      Provider.of<AppState>(context, listen: false).saveProject(widget.project);
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.all(12.0), // Τεράστιο αόρατο hitbox
-                      child: Container(
-                        padding: const EdgeInsets.all(6.0), // Μικρότερο οπτικό background
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    alignment: Alignment.center,
+                    children: [
+                      Container(
                         decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
-                        child: const Icon(Icons.screen_rotation, color: Colors.white70, size: 20),
+                        child: const Padding(
+                          padding: EdgeInsets.all(6.0),
+                          child: Icon(Icons.screen_rotation, color: Colors.white70, size: 24),
+                        ),
                       ),
-                    ),
+                      Positioned(
+                        top: -16, bottom: -16, left: -16, right: -16,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () {
+                            setState(() {
+                              if (isFullscreen) {
+                                widget.project.rotationPhaseLandscape = (widget.project.rotationPhaseLandscape + 1) % 4;
+                              } else {
+                                widget.project.rotationPhasePortrait = (widget.project.rotationPhasePortrait + 1) % 4;
+                              }
+                            });
+                            Provider.of<AppState>(context, listen: false).saveProject(widget.project);
+                          },
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 Positioned(
                   bottom: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 56 : 40) : 16,
                   left: isFullscreen ? ((widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 16 : 12) : 4,
                   child: Container(
-                    padding: EdgeInsets.symmetric(vertical: 4, horizontal: isFullscreen ? 2 : 0),
-                    decoration: BoxDecoration(color: Colors.black38, borderRadius: BorderRadius.circular(16)),
+                    padding: EdgeInsets.symmetric(vertical: 6, horizontal: isFullscreen ? 4 : 2),
+                    decoration: BoxDecoration(color: Colors.black45, borderRadius: BorderRadius.circular(16)),
                     child: StreamBuilder<double>(
                       stream: player.stream.volume,
                       initialData: player.state.volume,
@@ -2802,8 +2812,8 @@ class _EditorScreenState extends State<EditorScreen> {
                               behavior: HitTestBehavior.opaque,
                               onTap: () => player.setVolume(vol == 0 ? 100.0 : 0.0),
                               child: Padding(
-                                padding: EdgeInsets.all(isFullscreen ? 14.0 : 10.0), // Μεγαλύτερο hitbox
-                                child: Icon(vol == 0 ? Icons.volume_off : Icons.volume_up, color: Colors.grey.shade400, size: 20),
+                                padding: EdgeInsets.all(isFullscreen ? 6.0 : 4.0),
+                                child: Icon(vol == 0 ? Icons.volume_off : Icons.volume_up, color: Colors.grey.shade400, size: 24),
                               ),
                             ),
                           ],
@@ -2832,27 +2842,36 @@ class _EditorScreenState extends State<EditorScreen> {
                         ),
                       ),
                       const SizedBox(width: 4),
-                      Container(
-                        decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          child: Padding(
-                            padding: EdgeInsets.all(isFullscreen ? 12.0 : 6.0),
-                            child: Icon(isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen, color: Colors.grey.shade400, size: isFullscreen ? 34 : 26),
+                      Stack(
+                        clipBehavior: Clip.none,
+                        alignment: Alignment.center,
+                        children: [
+                          Container(
+                            decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
+                            child: Padding(
+                              padding: const EdgeInsets.all(6.0),
+                              child: Icon(isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen, color: Colors.grey.shade400, size: 26),
+                            ),
                           ),
-                          onTap: () {
-                            setState(() {
-                              isFullscreen = !isFullscreen;
-                            });
-                            if (isFullscreen) {
-                              SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeRight, DeviceOrientation.landscapeLeft]);
-                              SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-                            } else {
-                              SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-                              SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-                            }
-                          },
-                        ),
+                          Positioned(
+                            top: -16, bottom: -16, left: -16, right: -16,
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () {
+                                setState(() {
+                                  isFullscreen = !isFullscreen;
+                                });
+                                if (isFullscreen) {
+                                  SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeRight, DeviceOrientation.landscapeLeft]);
+                                  SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+                                } else {
+                                  SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+                                  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+                                }
+                              },
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
