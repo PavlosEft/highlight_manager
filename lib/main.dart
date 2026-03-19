@@ -2093,6 +2093,7 @@ class _EditorScreenState extends State<EditorScreen> {
   bool isPlaying = false;
   Duration duration = Duration.zero;
   double globalPositionSeconds = 0.0;
+  final ValueNotifier<double> globalPositionNotifier = ValueNotifier<double>(0.0);
   
   int activePhaseIndex = -1;
   HighlightPhase? currentPlayingPhase;
@@ -2179,9 +2180,8 @@ class _EditorScreenState extends State<EditorScreen> {
       }
       
       double currentGlobalSec = accumulated + (pos.inMilliseconds / 1000.0);
-      setState(() {
-        globalPositionSeconds = currentGlobalSec;
-      });
+      globalPositionSeconds = currentGlobalSec;
+      globalPositionNotifier.value = currentGlobalSec;
 
       if (isPlaying && !isSeeking) {
         bool isCurrentlyInHighlight = false;
@@ -2248,8 +2248,8 @@ class _EditorScreenState extends State<EditorScreen> {
         setState(() => isLoadingAnalysis = false);
         if (widget.project.lastActivePhaseIndex >= 0 && widget.project.lastActivePhaseIndex < widget.project.phases.length) {
           setState(() {
-            activePhaseIndex = widget.project.lastActivePhaseIndex;
-            currentPlayingPhase = widget.project.phases[activePhaseIndex];
+            currentPlayingPhase = widget.project.phases[widget.project.lastActivePhaseIndex];
+            activePhaseIndex = _filteredPhases.indexOf(currentPlayingPhase!);
           });
           _scrollToActivePhase();
         }
@@ -2436,6 +2436,7 @@ class _EditorScreenState extends State<EditorScreen> {
     positionSub?.cancel();
     player.dispose();
     _listScrollController.dispose();
+    globalPositionNotifier.dispose();
     super.dispose();
   }
 
@@ -2570,57 +2571,60 @@ class _EditorScreenState extends State<EditorScreen> {
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: SliderTheme(
-                  data: SliderTheme.of(context).copyWith(
-                    trackHeight: 6.0,
-                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8.0),
-                    inactiveTrackColor: Theme.of(context).colorScheme.onSurface.withOpacity(0.2),
-                    activeTrackColor: Theme.of(context).colorScheme.primary,
-                  ),
-                  child: Slider(
-                    value: globalPositionSeconds.clamp(0.0, widget.project.totalDuration > 0 ? widget.project.totalDuration : 1.0),
-                    max: widget.project.totalDuration > 0 ? widget.project.totalDuration : 1.0,
-                    onChangeStart: (v) {
-                      setState(() {
-                        isTrackingPhase = false;
-                        isAutoplaySuspended = true;
-                      });
-                    },
-                    onChanged: (v) {
-                      setState(() {
-                        globalPositionSeconds = v;
-                        isTrackingPhase = false;
-                        isAutoplaySuspended = true;
-                      });
-                      double accumulated = 0.0;
-                      for (int i = 0; i < widget.project.videoDurations.length; i++) {
-                        double dur = widget.project.videoDurations[i];
-                        if (v <= accumulated + dur || i == widget.project.videoDurations.length - 1) {
-                          if (player.state.playlist.index == i) {
-                            double localSeconds = v - accumulated;
-                            player.seek(Duration(milliseconds: (math.max(0.0, localSeconds) * 1000).toInt()));
+                child: ValueListenableBuilder<double>(
+                  valueListenable: globalPositionNotifier,
+                  builder: (context, currentPos, child) {
+                    return SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        trackHeight: 6.0,
+                        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8.0),
+                        inactiveTrackColor: Theme.of(context).colorScheme.onSurface.withOpacity(0.2),
+                        activeTrackColor: Theme.of(context).colorScheme.primary,
+                      ),
+                      child: Slider(
+                        value: currentPos.clamp(0.0, widget.project.totalDuration > 0 ? widget.project.totalDuration : 1.0),
+                        max: widget.project.totalDuration > 0 ? widget.project.totalDuration : 1.0,
+                        onChangeStart: (v) {
+                          setState(() {
+                            isTrackingPhase = false;
+                            isAutoplaySuspended = true;
+                          });
+                        },
+                        onChanged: (v) {
+                          globalPositionSeconds = v;
+                          globalPositionNotifier.value = v;
+                          double accumulated = 0.0;
+                          for (int i = 0; i < widget.project.videoDurations.length; i++) {
+                            double dur = widget.project.videoDurations[i];
+                            if (v <= accumulated + dur || i == widget.project.videoDurations.length - 1) {
+                              if (player.state.playlist.index == i) {
+                                double localSeconds = v - accumulated;
+                                player.seek(Duration(milliseconds: (math.max(0.0, localSeconds) * 1000).toInt()));
+                              }
+                              break;
+                            }
+                            accumulated += dur;
                           }
-                          break;
-                        }
-                        accumulated += dur;
-                      }
-                    },
-                    onChangeEnd: (v) {
-                      setState(() {
-                        isTrackingPhase = false;
-                        isAutoplaySuspended = true;
-                      });
-                      _seekGlobal(v).then((_) {
-                        player.play();
-                      });
-                    },
-                  ),
+                        },
+                        onChangeEnd: (v) {
+                          setState(() {
+                            isTrackingPhase = false;
+                            isAutoplaySuspended = true;
+                          });
+                          _seekGlobal(v).then((_) {
+                            player.play();
+                          });
+                        },
+                      ),
+                    );
+                  }
                 ),
               ),
               const SizedBox(width: 8),
-              Builder(
-                builder: (context) {
-                  final posDuration = Duration(milliseconds: (globalPositionSeconds * 1000).toInt());
+              ValueListenableBuilder<double>(
+                valueListenable: globalPositionNotifier,
+                builder: (context, currentPos, child) {
+                  final posDuration = Duration(milliseconds: (currentPos * 1000).toInt());
                   final totalDur = Duration(milliseconds: (widget.project.totalDuration * 1000).toInt());
                   return Text('${_formatDuration(posDuration)} / ${_formatDuration(totalDur)}', style: const TextStyle(fontWeight: FontWeight.bold));
                 }
@@ -2926,13 +2930,19 @@ class _EditorScreenState extends State<EditorScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(color: Colors.black45, borderRadius: BorderRadius.circular(16)),
-                        child: Text(
-                          '${_formatDuration(posDuration)} / ${_formatDuration(totalDur)}',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.grey.shade400,
-                          ),
+                        child: ValueListenableBuilder<double>(
+                          valueListenable: globalPositionNotifier,
+                          builder: (context, currentPos, child) {
+                            final pDur = Duration(milliseconds: (currentPos * 1000).toInt());
+                            return Text(
+                              '${_formatDuration(pDur)} / ${_formatDuration(totalDur)}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.grey.shade400,
+                              ),
+                            );
+                          }
                         ),
                       ),
                       const SizedBox(width: 4),
@@ -2975,52 +2985,54 @@ class _EditorScreenState extends State<EditorScreen> {
                     bottom: 0,
                     left: (widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 0 : 16,
                     right: (widget.project.rotationPhaseLandscape == 2 || widget.project.rotationPhaseLandscape == 3) ? 0 : 16,
-                    child: SliderTheme(
-                      data: SliderTheme.of(context).copyWith(
-                        trackHeight: 6.0,
-                        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8.0),
-                        overlayShape: const RoundSliderOverlayShape(overlayRadius: 16.0),
-                        trackShape: const RectangularSliderTrackShape(),
-                        activeTrackColor: Theme.of(context).colorScheme.primary,
-                        inactiveTrackColor: Colors.white38,
-                        thumbColor: Theme.of(context).colorScheme.primary,
-                      ),
-                      child: Slider(
-                        value: globalPositionSeconds.clamp(0.0, widget.project.totalDuration > 0 ? widget.project.totalDuration : 1.0),
-                        max: widget.project.totalDuration > 0 ? widget.project.totalDuration : 1.0,
-                        onChangeStart: (v) {
-                          setState(() {
-                            isTrackingPhase = false;
-                            isAutoplaySuspended = true;
-                          });
-                        },
-                        onChanged: (v) {
-                          setState(() {
-                            globalPositionSeconds = v;
-                            isTrackingPhase = false;
-                            isAutoplaySuspended = true;
-                          });
-                          double accumulated = 0.0;
-                          for (int i = 0; i < widget.project.videoDurations.length; i++) {
-                            double dur = widget.project.videoDurations[i];
-                            if (v <= accumulated + dur || i == widget.project.videoDurations.length - 1) {
-                              if (player.state.playlist.index == i) {
-                                double localSeconds = v - accumulated;
-                                player.seek(Duration(milliseconds: (math.max(0.0, localSeconds) * 1000).toInt()));
+                    child: ValueListenableBuilder<double>(
+                      valueListenable: globalPositionNotifier,
+                      builder: (context, currentPos, child) {
+                        return SliderTheme(
+                          data: SliderTheme.of(context).copyWith(
+                            trackHeight: 6.0,
+                            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8.0),
+                            overlayShape: const RoundSliderOverlayShape(overlayRadius: 16.0),
+                            trackShape: const RectangularSliderTrackShape(),
+                            activeTrackColor: Theme.of(context).colorScheme.primary,
+                            inactiveTrackColor: Colors.white38,
+                            thumbColor: Theme.of(context).colorScheme.primary,
+                          ),
+                          child: Slider(
+                            value: currentPos.clamp(0.0, widget.project.totalDuration > 0 ? widget.project.totalDuration : 1.0),
+                            max: widget.project.totalDuration > 0 ? widget.project.totalDuration : 1.0,
+                            onChangeStart: (v) {
+                              setState(() {
+                                isTrackingPhase = false;
+                                isAutoplaySuspended = true;
+                              });
+                            },
+                            onChanged: (v) {
+                              globalPositionSeconds = v;
+                              globalPositionNotifier.value = v;
+                              double accumulated = 0.0;
+                              for (int i = 0; i < widget.project.videoDurations.length; i++) {
+                                double dur = widget.project.videoDurations[i];
+                                if (v <= accumulated + dur || i == widget.project.videoDurations.length - 1) {
+                                  if (player.state.playlist.index == i) {
+                                    double localSeconds = v - accumulated;
+                                    player.seek(Duration(milliseconds: (math.max(0.0, localSeconds) * 1000).toInt()));
+                                  }
+                                  break;
+                                }
+                                accumulated += dur;
                               }
-                              break;
-                            }
-                            accumulated += dur;
-                          }
-                        },
-                        onChangeEnd: (v) {
-                          setState(() {
-                            isTrackingPhase = false;
-                            isAutoplaySuspended = true;
-                          });
-                          _seekGlobal(v).then((_) => player.play());
-                        },
-                      ),
+                            },
+                            onChangeEnd: (v) {
+                              setState(() {
+                                isTrackingPhase = false;
+                                isAutoplaySuspended = true;
+                              });
+                              _seekGlobal(v).then((_) => player.play());
+                            },
+                          ),
+                        );
+                      }
                     ),
                   ),
                 if (_showStarFeedback || _autoStarFeedback)
@@ -3107,49 +3119,51 @@ class _EditorScreenState extends State<EditorScreen> {
         // Γραμμή 1: Slider
         SizedBox(
           height: 12,
-          child: SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              trackHeight: 3.0,
-              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6.0),
-              overlayShape: const RoundSliderOverlayShape(overlayRadius: 12.0),
-              trackShape: const RectangularSliderTrackShape(), 
-            ),
-            child: Slider(
-              value: globalPositionSeconds.clamp(0.0, widget.project.totalDuration > 0 ? widget.project.totalDuration : 1.0),
-              max: widget.project.totalDuration > 0 ? widget.project.totalDuration : 1.0,
-              onChangeStart: (v) {
-                setState(() {
-                  isTrackingPhase = false;
-                  isAutoplaySuspended = true;
-                });
-              },
-              onChanged: (v) {
-                setState(() {
-                  globalPositionSeconds = v;
-                  isTrackingPhase = false;
-                  isAutoplaySuspended = true;
-                });
-                double accumulated = 0.0;
-                for (int i = 0; i < widget.project.videoDurations.length; i++) {
-                  double dur = widget.project.videoDurations[i];
-                  if (v <= accumulated + dur || i == widget.project.videoDurations.length - 1) {
-                    if (player.state.playlist.index == i) {
-                      double localSeconds = v - accumulated;
-                      player.seek(Duration(milliseconds: (math.max(0.0, localSeconds) * 1000).toInt()));
+          child: ValueListenableBuilder<double>(
+            valueListenable: globalPositionNotifier,
+            builder: (context, currentPos, child) {
+              return SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  trackHeight: 3.0,
+                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6.0),
+                  overlayShape: const RoundSliderOverlayShape(overlayRadius: 12.0),
+                  trackShape: const RectangularSliderTrackShape(), 
+                ),
+                child: Slider(
+                  value: currentPos.clamp(0.0, widget.project.totalDuration > 0 ? widget.project.totalDuration : 1.0),
+                  max: widget.project.totalDuration > 0 ? widget.project.totalDuration : 1.0,
+                  onChangeStart: (v) {
+                    setState(() {
+                      isTrackingPhase = false;
+                      isAutoplaySuspended = true;
+                    });
+                  },
+                  onChanged: (v) {
+                    globalPositionSeconds = v;
+                    globalPositionNotifier.value = v;
+                    double accumulated = 0.0;
+                    for (int i = 0; i < widget.project.videoDurations.length; i++) {
+                      double dur = widget.project.videoDurations[i];
+                      if (v <= accumulated + dur || i == widget.project.videoDurations.length - 1) {
+                        if (player.state.playlist.index == i) {
+                          double localSeconds = v - accumulated;
+                          player.seek(Duration(milliseconds: (math.max(0.0, localSeconds) * 1000).toInt()));
+                        }
+                        break;
+                      }
+                      accumulated += dur;
                     }
-                    break;
-                  }
-                  accumulated += dur;
-                }
-              },
-              onChangeEnd: (v) {
-                setState(() {
-                  isTrackingPhase = false;
-                  isAutoplaySuspended = true;
-                });
-                _seekGlobal(v).then((_) => player.play());
-              },
-            ),
+                  },
+                  onChangeEnd: (v) {
+                    setState(() {
+                      isTrackingPhase = false;
+                      isAutoplaySuspended = true;
+                    });
+                    _seekGlobal(v).then((_) => player.play());
+                  },
+                ),
+              );
+            }
           ),
         ),
         // Γραμμή 2: Κουμπιά (Συμπαγή & Οβάλ Play)
