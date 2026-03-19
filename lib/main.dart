@@ -2633,8 +2633,29 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   Timer? _seekTimer;
+  bool _isSeekingActive = false;
+  bool _isForwardSeek = true;
+  bool _showJumpIndicator = false;
+  String _jumpText = "";
+  Timer? _jumpTimer;
+
+  void _showJumpFeedback(bool forward) {
+    setState(() {
+      _showJumpIndicator = true;
+      _jumpText = forward ? "+5s" : "-5s";
+      _isForwardSeek = forward;
+    });
+    _jumpTimer?.cancel();
+    _jumpTimer = Timer(const Duration(milliseconds: 600), () {
+      if (mounted) setState(() => _showJumpIndicator = false);
+    });
+  }
 
   void _startSeeking(bool forward) {
+    setState(() {
+      _isSeekingActive = true;
+      _isForwardSeek = forward;
+    });
     _seekTimer?.cancel();
     _seekTimer = Timer.periodic(const Duration(milliseconds: 200), (timer) {
       final currentPos = globalPositionSeconds;
@@ -2657,6 +2678,9 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   void _stopSeeking() {
+    if (mounted) {
+      setState(() => _isSeekingActive = false);
+    }
     _seekTimer?.cancel();
   }
 
@@ -2689,9 +2713,11 @@ class _EditorScreenState extends State<EditorScreen> {
             final x = details.localPosition.dx;
             if (x < width * 0.3) {
               double target = (globalPositionSeconds - 5.0).clamp(0.0, widget.project.totalDuration);
+              _showJumpFeedback(false);
               _seekGlobal(target);
             } else if (x > width * 0.7) {
               double target = (globalPositionSeconds + 5.0).clamp(0.0, widget.project.totalDuration);
+              _showJumpFeedback(true);
               _seekGlobal(target);
             }
           },
@@ -3025,6 +3051,37 @@ class _EditorScreenState extends State<EditorScreen> {
                       );
                     },
                   ),
+                if (_showJumpIndicator || _isSeekingActive)
+                  Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                      decoration: BoxDecoration(
+                        color: const Color(0x33000000), // ~20% αχνό μαύρο
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _isForwardSeek ? Icons.fast_forward : Icons.fast_rewind,
+                            color: Colors.white60, // Αχνό λευκό για το εικονίδιο
+                            size: 48,
+                          ),
+                          if (_showJumpIndicator) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              _jumpText,
+                              style: const TextStyle(
+                                color: Colors.white70, // Αχνό λευκό για το κείμενο
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
                       ],
                     ),
                   ),
@@ -3124,6 +3181,7 @@ class _EditorScreenState extends State<EditorScreen> {
                         onTap: () => _navigate(-1),
                         onDoubleTap: () {
                           double target = (globalPositionSeconds - 5.0).clamp(0.0, widget.project.totalDuration);
+                          _showJumpFeedback(false);
                           _seekGlobal(target);
                         },
                         onLongPressStart: (_) => _startSeeking(false),
@@ -3153,6 +3211,7 @@ class _EditorScreenState extends State<EditorScreen> {
                         onTap: () => _navigate(1),
                         onDoubleTap: () {
                           double target = (globalPositionSeconds + 5.0).clamp(0.0, widget.project.totalDuration);
+                          _showJumpFeedback(true);
                           _seekGlobal(target);
                         },
                         onLongPressStart: (_) => _startSeeking(true),
