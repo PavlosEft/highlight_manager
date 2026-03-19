@@ -2961,16 +2961,26 @@ class _EditorScreenState extends State<EditorScreen> {
                             top: -16, bottom: -16, left: -16, right: -16,
                             child: GestureDetector(
                               behavior: HitTestBehavior.opaque,
-                              onTap: () {
-                                setState(() {
-                                  isFullscreen = !isFullscreen;
-                                });
+                              onTap: () async {
                                 if (isFullscreen) {
-                                  SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeRight, DeviceOrientation.landscapeLeft]);
-                                  SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-                                } else {
+                                  // 1. Ζητάμε από το OS να γυρίσει την οθόνη (Portrait)
                                   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
                                   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+                                  // 2. Δίνουμε χρόνο στο native animation να τρέξει χωρίς "σπάσιμο"
+                                  await Future.delayed(const Duration(milliseconds: 200));
+                                  // 3. Ξαναχτίζουμε το βαρύ UI (Λίστα με Highlights κ.λπ.)
+                                  if (mounted) {
+                                    setState(() {
+                                      isFullscreen = false;
+                                    });
+                                  }
+                                } else {
+                                  // Κατά την είσοδο, το UI είναι ελαφρύ οπότε γίνεται ακαριαία
+                                  setState(() {
+                                    isFullscreen = true;
+                                  });
+                                  SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeRight, DeviceOrientation.landscapeLeft]);
+                                  SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
                                 }
                               },
                             ),
