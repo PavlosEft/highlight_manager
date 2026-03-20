@@ -1620,10 +1620,21 @@ class HomeScreen extends StatelessWidget {
                           pName = pData['name'] ?? pName;
                         } catch(_) {}
                         final safeName = pName.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
-                        analysisFile.copySync('$exportPath/analysis_$safeName.json');
-                        if (errFile.existsSync()) {
-                          errFile.copySync('$exportPath/error_$safeName.txt');
+                        
+                        // Δημιουργία ξεχωριστού φακέλου για το Project
+                        final projectExportDir = Directory('$exportPath/$safeName');
+                        if (!projectExportDir.existsSync()) {
+                          projectExportDir.createSync(recursive: true);
                         }
+                        
+                        // Εξαγωγή του Project (Backup) στον δικό του φάκελο
+                        projectFile.copySync('${projectExportDir.path}/project.json');
+                        
+                        // Εξαγωγή της Ανάλυσης στον ίδιο φάκελο
+                        if (analysisFile.existsSync()) {
+                          analysisFile.copySync('${projectExportDir.path}/analysis.json');
+                        }
+                        
                         count++;
                       }
                     }
@@ -1632,7 +1643,7 @@ class HomeScreen extends StatelessWidget {
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text('✅ Εξήχθησαν $count JSON!\nΒρίσκονται στο:\n$exportPath (Δες μέσω USB)'),
+                      content: Text('✅ Έγινε Backup $count Projects σε φακέλους!\nΒρίσκονται στο:\n$exportPath'),
                       duration: const Duration(seconds: 8),
                     )
                   );
