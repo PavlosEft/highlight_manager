@@ -1612,6 +1612,7 @@ class HomeScreen extends StatelessWidget {
                     if (entity is Directory) {
                       final analysisFile = File('${entity.path}/analysis.json');
                       final projectFile = File('${entity.path}/project.json');
+                      final errFile = File('${entity.path}/ffmpeg_error.txt');
                       if (analysisFile.existsSync() && projectFile.existsSync()) {
                         String pName = entity.path.split(Platform.pathSeparator).last;
                         try {
@@ -1620,6 +1621,9 @@ class HomeScreen extends StatelessWidget {
                         } catch(_) {}
                         final safeName = pName.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
                         analysisFile.copySync('$exportPath/analysis_$safeName.json');
+                        if (errFile.existsSync()) {
+                          errFile.copySync('$exportPath/error_$safeName.txt');
+                        }
                         count++;
                       }
                     }
@@ -1909,6 +1913,14 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
       }
       final session = await FFmpegKit.executeWithArguments(safeArgs);
       final returnCode = await session.getReturnCode();
+      if (returnCode?.isValueSuccess() != true) {
+        final logs = await session.getAllLogsAsString();
+        try {
+          final dir = await getApplicationDocumentsDirectory();
+          final errFile = File('${dir.path}/HighlightManager/${widget.project.id}/ffmpeg_error.txt');
+          await errFile.writeAsString('CMD: ${safeArgs.join(' ')}\n\nLOGS:\n$logs');
+        } catch (_) {}
+      }
       return returnCode?.isValueSuccess() == true ? 0 : 1;
     }
   }
@@ -1916,18 +1928,31 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
   Future<void> _startExport() async {
     try {
       final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-      final tempDir = Directory('${widget.outDir}/temp_$timestamp');
-      if (widget.mode == 'join') await tempDir.create();
+      Directory tempDir;
+      if (Platform.isAndroid || Platform.isIOS) {
+        final appDir = await getTemporaryDirectory();
+        tempDir = Directory('${appDir.path}/temp_$timestamp');
+      } else {
+        tempDir = Directory('${widget.outDir}/temp_$timestamp');
+      }
+      await tempDir.create(recursive: true);
 
       final isCompress = widget.config['compress'] as bool;
       
-      List<String> videoParams = isCompress 
-          ? ['-c:v', 'libx265', '-crf', '26', '-preset', 'medium', '-tag:v', 'hvc1']
-          : ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23'];
+      List<String> videoParams;
+      if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+        videoParams = isCompress 
+            ? ['-c:v', 'libx265', '-crf', '26', '-preset', 'medium', '-tag:v', 'hvc1']
+            : ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23'];
+      } else {
+        videoParams = isCompress 
+            ? ['-c:v', 'mpeg4', '-q:v', '10']
+            : ['-c:v', 'mpeg4', '-q:v', '2'];
+      }
 
       if (widget.mode == 'separate') {
         final clipsDir = Directory('${widget.outDir}/${widget.project.name}_clips_$timestamp');
-        await clipsDir.create();
+        try { await clipsDir.create(); } catch (_) {}
 
         for (int i = 0; i < widget.highlights.length; i++) {
           if (isCancelled) throw Exception('Cancelled');
@@ -1942,15 +1967,22 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
           final startGlobal = math.max(0.0, ts - cStart);
           final localData = _getLocalVideoData(startGlobal);
           final dur = cStart + cEnd + 0.5;
-          final outPath = '${clipsDir.path}/clip_${i + 1}.mp4';
+          final tempOutPath = '${tempDir.path}/clip_${i + 1}.mp4';
+          final finalOutPath = '${clipsDir.path}/clip_${i + 1}.mp4';
 
           final args = [
             '-y', '-ss', localData.localSeconds.toStringAsFixed(3), '-i', localData.path, '-t', dur.toString(),
-            ...videoParams, '-c:a', 'aac', outPath
+            ...videoParams, '-c:a', 'aac', tempOutPath
           ];
           
           final code = await _runFFmpeg(args);
           if (code != 0 && !isCancelled) throw Exception('FFmpeg error');
+          
+          try {
+            await File(tempOutPath).copy(finalOutPath);
+          } catch (e) {
+            throw Exception('Αποτυχία αποθήκευσης στο φάκελο: $e');
+          }
         }
       } else {
         List<String> processedClips = [];
@@ -2007,19 +2039,28 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
         final listFile = File('${tempDir.path}/inputs.txt');
         String listContent = '';
         for (int i = 0; i < processedClips.length; i++) {
-          listContent += "file '${processedClips[i].replaceAll('\\', '/')}'\n";
+          // Χρήση σχετικών μονοπατιών (relative paths) για αποφυγή σφαλμάτων demuxer στο Android
+          listContent += "file 'part_$i.mp4'\n";
           if (transTemp.isNotEmpty && i < processedClips.length - 1) {
-            listContent += "file '${transTemp.replaceAll('\\', '/')}'\n";
+            listContent += "file 'trans.mp4'\n";
           }
         }
-        await listFile.writeAsString(listContent);
+        await listFile.writeAsString(listContent, flush: true);
 
-        final mergedOut = '${widget.outDir}/${widget.project.name}_merged_$timestamp.mp4';
+        final mergedOutTemp = '${tempDir.path}/merged_$timestamp.mp4';
+        final mergedOutFinal = '${widget.outDir}/${widget.project.name}_merged_$timestamp.mp4';
+        
         final catArgs = [
-          '-y', '-f', 'concat', '-safe', '0', '-i', listFile.path, '-c', 'copy', mergedOut
+          '-y', '-f', 'concat', '-safe', '0', '-i', listFile.path, '-c', 'copy', mergedOutTemp
         ];
         final code = await _runFFmpeg(catArgs);
         if (code != 0 && !isCancelled) throw Exception('FFmpeg error concat');
+        
+        try {
+          await File(mergedOutTemp).copy(mergedOutFinal);
+        } catch (e) {
+          throw Exception('Αποτυχία αποθήκευσης στο φάκελο: $e');
+        }
         
         try { await tempDir.delete(recursive: true); } catch (_) {}
       }
