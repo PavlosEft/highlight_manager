@@ -1,14 +1,14 @@
 
 
+να εμφανίζονται σωστά τα εικονίδια και να μη βγάζει αλλά μπουρνέζικα στα μαύρα παράθυρα χωρίς όμως να αλλάξει η γραμματοσειρά 
+εδώ σου δίνω κάποια screenshot
 
-
+to export!!!
 
 να δω λίγο το παλιό ui είναι λίγο πιο ξεκάθαρο στα highlights που έχουν πολλά κουμπιά
 https://gemini.google.com/app/f8df2aaf018431b9?_gl=1*1102ra6*_gcl_au*MTUwMTk5MTc5OS4xNzY0NDQ5ODk3*_ga*MzU3OTk5MTUwLjE3NjQ0NDk4MzU.*_ga_WC57KJ50ZZ*czE3NjQ0NDk4MzUkbzEkZzEkdDE3NjQ0NTA5NzEkajUxJGwwJGgw
 
 
-να εμφανίζονται σωστά τα εικονίδια και να μη βγάζει αλλά μπουρνέζικα στα μαύρα παράθυρα χωρίς όμως να αλλάξει η γραμματοσειρά 
-εδώ σου δίνω κάποια screenshot
 
 licensing API
 
