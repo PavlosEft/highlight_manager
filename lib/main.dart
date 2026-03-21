@@ -187,6 +187,13 @@ const Map<String, Map<String, String>> translations = {
     'cancelling': 'ΑΚΥΡΩΝΕΤΑΙ...',
     'cancel_confirm_title': 'Ακύρωση Ανάλυσης',
     'cancel_confirm_msg': 'Είστε σίγουροι ότι θέλετε να διακόψετε την ανάλυση;',
+    'sync_title': 'Συγχρονισμός Project',
+    'sync_info': 'Επιλέξτε Backup για εξαγωγή στο PC ή Restore για εισαγωγή των δεδομένων σας (JSON και Thumbnails).',
+    'backup_btn': 'BACKUP ΣΤΟ PC',
+    'restore_btn': 'RESTORE ΑΠΟ PC',
+    'sync_done': 'Η διαδικασία ολοκληρώθηκε επιτυχώς!',
+    'sync_err': 'Σφάλμα κατά τη διαδικασία: ',
+    'sync_no_ext': 'Δεν βρέθηκε εξωτερικός χώρος αποθήκευσης.',
   },
   'en': {
     'title': 'Highlight Manager',
@@ -464,6 +471,57 @@ class AppState extends ChangeNotifier {
       for (var p in _activeFfmpegProcesses) p.kill();
     } else {
       FFmpegKit.cancel(); 
+    }
+  }
+
+  Future<void> syncProjects(bool isBackup, Function(String) onComplete, Function(String) onError) async {
+    try {
+      final extDir = await getExternalStorageDirectory();
+      if (extDir == null) {
+        onError(t('sync_no_ext'));
+        return;
+      }
+
+      final exportPath = '${extDir.path}/JSON_Exports';
+      final exportDir = Directory(exportPath);
+      final internalDir = await _localPath;
+
+      if (isBackup) {
+        if (!exportDir.existsSync()) exportDir.createSync(recursive: true);
+        if (internalDir.existsSync()) {
+          for (var entity in internalDir.listSync()) {
+            if (entity is Directory) {
+              final projId = entity.path.split(Platform.pathSeparator).last;
+              final targetDir = Directory('${exportDir.path}/$projId');
+              if (!targetDir.existsSync()) targetDir.createSync(recursive: true);
+              
+              for (String f in ['project.json', 'analysis.json', 'thumb_0.jpg', 'thumb_1.jpg', 'thumb_2.jpg', 'thumb_3.jpg']) {
+                final sourceFile = File('${entity.path}/$f');
+                if (sourceFile.existsSync()) sourceFile.copySync('${targetDir.path}/$f');
+              }
+            }
+          }
+        }
+      } else {
+        if (exportDir.existsSync()) {
+          for (var entity in exportDir.listSync()) {
+            if (entity is Directory) {
+              final projId = entity.path.split(Platform.pathSeparator).last;
+              final targetDir = Directory('${internalDir.path}/$projId');
+              if (!targetDir.existsSync()) targetDir.createSync(recursive: true);
+
+              for (String f in ['project.json', 'analysis.json', 'thumb_0.jpg', 'thumb_1.jpg', 'thumb_2.jpg', 'thumb_3.jpg']) {
+                final sourceFile = File('${entity.path}/$f');
+                if (sourceFile.existsSync()) sourceFile.copySync('${targetDir.path}/$f');
+              }
+            }
+          }
+          await loadAllProjects();
+        }
+      }
+      onComplete(t('sync_done'));
+    } catch (e) {
+      onError('${t('sync_err')}$e');
     }
   }
 
