@@ -14,3 +14,4 @@ build/
 *.log
 FileList.txt
 .trigger_reload
+tool/.logs.txt
