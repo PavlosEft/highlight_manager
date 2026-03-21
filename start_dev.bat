@@ -1,8 +1,19 @@
 @echo off
-title Flutter Smart Dev Server
-echo Starting Device Mirror...
-start cmd /k "C:\Users\Lenovo\Desktop\device-mirror\run-mirror.bat"
-echo Starting AI Patcher in background...
-start cmd /k "title AI Patcher && dart run tool\ai_patcher.dart"
-echo Starting the App...
-cmd /k "dart run tool\dev_server.dart"
+
+echo 🧹 Arhikos Katharismos...
+call kill_all.bat
+
+:: ΤΩΡΑ του δίνουμε το όνομα, ΑΦΟΥ έχει τελειώσει ο καθαρισμός
+title Control Panel - Smart Dev Server
+
+echo.
+echo 🚀 Starting Device Mirror...
+start cmd /c "C:\Users\Lenovo\Desktop\device-mirror\run-mirror.bat"
+
+echo 🛡️ Energopoiisi Eksipnou Fylaka (Watcher)...
+:: Ο Φύλακας πλέον ελέγχει ταχύτατα τη ΣΥΓΚΕΚΡΙΜΕΝΗ διεργασία του server
+start powershell -WindowStyle Hidden -Command "$dummy='EksipnosFylakas'; Start-Sleep -Seconds 3; while (Get-CimInstance Win32_Process -Filter \"Name='dart.exe' and CommandLine like '%%dev_server.dart%%'\") { Start-Sleep -Seconds 1 }; Start-Process -WindowStyle Hidden cmd.exe -ArgumentList '/c kill_all.bat'"
+
+echo ⚡ Starting Unified Control Panel...
+dart run tool\dev_server.dart
+pause
