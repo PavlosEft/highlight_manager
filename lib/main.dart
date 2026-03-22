@@ -606,6 +606,18 @@ class AppState extends ChangeNotifier {
 
         if (newExists && newPath != null) {
           project.videoPaths[i] = newPath;
+          
+          // Ενημέρωση μεγέθους στα metadata για να λειτουργεί σωστά η ανίχνευση στο μέλλον 
+          try {
+            if (newPath.startsWith('content://')) {
+              const platform = MethodChannel('com.example.highlight_manager/native_picker');
+              final int? actualSize = await platform.invokeMethod('getFileSize', {'path': newPath});
+              if (actualSize != null) project.videoSizes[i] = actualSize;
+            } else {
+              project.videoSizes[i] = File(newPath).lengthSync();
+            }
+          } catch (_) {}
+
           changed = true;
         } else {
           allFound = false; // Δεν το βρήκε, αλλά ΣΥΝΕΧΙΖΕΙ την αναζήτηση για τα επόμενα
