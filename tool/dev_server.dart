@@ -158,7 +158,7 @@ void main() async {
     debounceTimer?.cancel();
     debounceTimer = Timer(const Duration(milliseconds: 300), () { // Αυξημένο delay για ασφάλεια
       if (path.endsWith('.dart') || path.endsWith('.yaml')) {
-         triggerFlutterCommand('r', 'Auto-Reload (File Save)');
+         triggerFlutterCommand('R', 'Auto-Restart (File Save)');
       }
     });
   }
@@ -288,24 +288,13 @@ void scheduleClipboardCheck() {
         
         if (success) {
           print('✅ Patch Εφαρμόστηκε! Creating snapshot...');
-          await manageZipsBeforePatch();
           await createCurrentZip(); 
 
-          final actionRegex = RegExp(r'<ACTION>(.*?)</ACTION>', dotAll: true);
-          final actionMatch = actionRegex.firstMatch(rawData);
-          String action = 'RELOAD'; 
-          if (actionMatch != null) action = actionMatch.group(1)!.trim().toUpperCase();
 
           // Ξεκλείδωμα watcher με μικρή καθυστέρηση για να προλάβει το σύστημα αρχείων
           Timer(const Duration(milliseconds: 1500), () {
             isAIWorking = false;
-            if (action == 'RESTART') {
-              triggerFlutterCommand('R', 'AI Auto-Restart');
-            } else if (action == 'CLEAN') {
-              print('\n🧹 [AI CLEAN] Απαιτείται καθαρισμός. Πάτα [x] στον Server!');
-            } else {
-              triggerFlutterCommand('r', 'AI Auto-Reload');
-            }
+            triggerFlutterCommand('R', 'AI Auto-Restart');
           });
         } else {
           isAIWorking = false;
@@ -404,37 +393,16 @@ bool applyPatch(String rawClipboard) {
   return false; 
 }
 
-Future<void> manageZipsBeforePatch() async {
-  final rootFiles = Directory('.').listSync();
-  for (var file in rootFiles) {
-    if (file is File && file.path.contains('SourceCode_') && file.path.endsWith('.zip') && !file.path.contains('(OK)')) {
-      final fileName = file.path.split(Platform.pathSeparator).last;
-      await file.rename('Backups/$fileName');
-    }
-  }
-}
+
 
 Future<void> createCurrentZip() async {
-  final now = DateTime.now();
-  final timestamp = "${now.day}-${now.month}-${now.year}_${now.hour}-${now.minute}-${now.second}";
-  final zipName = "SourceCode_$timestamp.zip"; 
-  final targets = ['lib', 'tool', 'AI_INSTRUCTIONS.txt', 'pubspec.yaml', 'start_dev.bat', 'zip_source_code.bat'];
-  final existingTargets = targets.where((t) => FileSystemEntity.typeSync(t) != FileSystemEntityType.notFound).toList();
-
-  final result = await Process.run('tar.exe', ['-a', '-c', '-f', zipName, ...existingTargets], runInShell: true);
-  if (result.exitCode == 0) print('📦 Auto-Zip: OK ($zipName)');
+  print('\n📦 Auto-Zip: Εκτέλεση εξωτερικού script...');
+  await Process.run('cmd', ['/c', 'zip_source_code.bat'], runInShell: true);
 }
 
 Future<void> createOkZip() async {
-  print('\n⏳ Δημιουργία Μόνιμου (OK) Snapshot...');
-  final now = DateTime.now();
-  final timestamp = "${now.day}-${now.month}-${now.year}_${now.hour}-${now.minute}-${now.second}";
-  final zipName = "SourceCode_$timestamp(OK).zip"; 
-  final targets = ['lib', 'tool', 'AI_INSTRUCTIONS.txt', 'pubspec.yaml', 'start_dev.bat', 'zip_source_code.bat'];
-  final existingTargets = targets.where((t) => FileSystemEntity.typeSync(t) != FileSystemEntityType.notFound).toList();
-
-  final result = await Process.run('tar.exe', ['-a', '-c', '-f', zipName, ...existingTargets], runInShell: true);
-  if (result.exitCode == 0) print('✅ [OK] Νέο Μόνιμο Snapshot: $zipName');
+  print('\n⏳ Δημιουργία Μόνιμου (OK) Snapshot μέσω εξωτερικού script...');
+  await Process.run('cmd', ['/c', 'zip_source_code.bat', 'OK'], runInShell: true);
 }
 
 void handleUndoConfirmation(String input) async {

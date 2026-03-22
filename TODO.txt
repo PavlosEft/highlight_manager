@@ -1,5 +1,8 @@
 
 
+KIN TODO ->
+να βρω τρόπο να αλλάζω τα path τον αρχείων και να πάρω αυτά που είναι στην κάρτα μνήμης
+
 zip δεν mου παίρνει το αρχείο dev servers 
 https://gemini.google.com/app/f8767b1d83ad1766
 
@@ -8,6 +11,12 @@ https://gemini.google.com/app/76bacda14f13ecdb
 
 omadopoihsh apanalamvanomenes faseis
 https://gemini.google.com/app/4f6e73f6e05fbe1f
+
+να μπορώ να αλλάζω γενικά το zoom πόσο μεγάλα πόσο μικρά να φαίνονται τα εικονίδια 
+
+να ρωτάει στην αρχή ανάλυση τώρα ή θα τα βρω μόνος μου 
+και κάπου να υπάρχει και ένα κουμπί για ανάλυσητο κουμπί για ανάλυση να μπορεί να κάνει διαφορετικές αναλύσεις 
+deep analysis random να διαλέγω πόσες σκηνές να βάλει  είναι να διαλέγω πόσο χρόνο θέλω να βγάλω export
 
 
 to export!!!

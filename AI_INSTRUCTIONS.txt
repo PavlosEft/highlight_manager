@@ -15,19 +15,15 @@ DEVELOPMENT & ARCHITECTURE GUIDELINES:
 CRITICAL OUTPUT RULES:
 1. NO CONVERSATIONAL FILLER: When the user asks for a feature or fix, DO NOT write explanations, introductions, or apologies.
 2. EXCLUSIVE FORMAT: You must output ONLY valid XML-like patch blocks, specifically using the <HM_PATCH> root tag.
-3. RESTART/CLEAN WARNINGS: If a patch alters state initialization, models, or dependencies, you MUST append a single short warning exactly BEFORE the markdown block (e.g., "⚠️ Απαιτείται Hot Restart (R)" or "⚠️ Απαιτείται καθαρισμός cache").
-4. AUTOMATED ACTIONS: If a patch alters state initialization, models, dependencies, or UI, you MUST include a specific action tag INSIDE the markdown code block, exactly BEFORE the <HM_PATCH> tag. The server will read this to auto-execute the action. Use ONE of the following:
-   - <ACTION>RELOAD</ACTION> (For simple UI/Logic changes)
-   - <ACTION>RESTART</ACTION> (For changes in models/state/main.dart)
-   - <ACTION>CLEAN</ACTION> (For changes in pubspec.yaml or native code)
-5. CODE BLOCK WRAPPER: You MUST ALWAYS wrap the XML patch inside a markdown code block (using ```xml at the start and ``` at the end) so the user gets a "Copy" button.
-6. STRICT EXACT MATCHING (BYTE-FOR-BYTE): The tool parsing these patches uses a strict `.contains()` string match. The code inside <REPLACE> MUST be a 100% exact copy of the user's existing code. DO NOT reformat the code. DO NOT fix indentation. DO NOT add or remove empty lines. Preserve the exact whitespace and line breaks as provided in the context.
-7. MINIMAL REPLACE BLOCKS: Keep the <REPLACE> block as small as logically possible while ensuring it remains unique within the file. Avoid including massive chunks of unmodified code. If you only need to change 2 lines, include only those 2 lines and enough immediate context to make it unique. The larger the block, the higher the chance of a strict-match failure.
-8. NO NON-BREAKING SPACES: Never generate non-breaking spaces (\xA0) in the patch block. Use only standard space characters (\x20).
-9. MULTIPLE CHANGES: If you need to change multiple disconnected parts of a file, use multiple <HM_PATCH> blocks.
+3. CLEAN/BUILD WARNINGS: If a patch alters `pubspec.yaml` or native code, you MUST append a highly visible warning exactly BEFORE the markdown block (e.g., ⚠️ Απαιτείται CLEAN" etc).
+4. CODE BLOCK WRAPPER: You MUST ALWAYS wrap the XML patch inside a markdown code block (using ```xml at the start and ``` at the end) so the user gets a "Copy" button.
+5. STRICT EXACT MATCHING (BYTE-FOR-BYTE): The tool parsing these patches uses a strict `.contains()` string match.The code inside <REPLACE> MUST be a 100% exact copy of the user's existing code. DO NOT reformat the code.DO NOT fix indentation. DO NOT add or remove empty lines.Preserve the exact whitespace and line breaks as provided in the context.
+6. MINIMAL REPLACE BLOCKS: Keep the <REPLACE> block as small as logically possible while ensuring it remains unique within the file. Avoid including massive chunks of unmodified code. If you only need to change 2 lines, include only those 2 lines and enough immediate context to make it unique.The larger the block, the higher the chance of a strict-match failure.
+7. NO NON-BREAKING SPACES: Never generate non-breaking spaces (\xA0) in the patch block. Use only standard space characters (\x20).
+8. MULTIPLE CHANGES: If you need to change multiple disconnected parts of a file, use multiple <HM_PATCH> blocks.
+
 PATCH FORMAT TEMPLATE:
 ```xml
-<ACTION>RELOAD</ACTION>
 <HM_PATCH>
 <FILE>lib/main.dart</FILE>
 <REPLACE>
@@ -38,7 +34,7 @@ PATCH FORMAT TEMPLATE:
 <WITH>
   void newCode() {
     print('new');
-  }
+}
 </WITH>
 </HM_PATCH>
 ```
