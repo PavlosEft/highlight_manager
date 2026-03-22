@@ -62,6 +62,7 @@ class Project {
   String name;
   List<String> videoPaths;
   List<double> videoDurations;
+  List<int> videoSizes;
   List<HighlightPhase> phases;
   DateTime createdAt;
   double totalDuration;
@@ -81,6 +82,7 @@ class Project {
     required this.name,
     required this.videoPaths,
     List<double>? videoDurations,
+    List<int>? videoSizes,
     List<HighlightPhase>? phases,
     DateTime? createdAt,
     this.totalDuration = 0.0,
@@ -95,6 +97,7 @@ class Project {
     this.rotationPhaseLandscape = 0,
     this.rotationPhasePortrait = 0,
   })  : videoDurations = videoDurations ?? [],
+        videoSizes = videoSizes ?? [],
         phases = phases ?? [],
         createdAt = createdAt ?? DateTime.now();
 
@@ -103,6 +106,7 @@ class Project {
         'name': name,
         'videoPaths': videoPaths,
         'videoDurations': videoDurations,
+        'videoSizes': videoSizes,
         'phases': phases.map((e) => e.toJson()).toList(),
         'createdAt': createdAt.toIso8601String(),
         'totalDuration': totalDuration,
@@ -124,6 +128,9 @@ class Project {
         videoPaths: List<String>.from(json['videoPaths']),
         videoDurations: json['videoDurations'] != null 
             ? List<double>.from(json['videoDurations'].map((x) => x.toDouble()))
+            : [],
+        videoSizes: json['videoSizes'] != null 
+            ? List<int>.from(json['videoSizes'].map((x) => x.toInt()))
             : [],
         phases: (json['phases'] as List)
             .map((e) => HighlightPhase.fromJson(e))
@@ -194,6 +201,12 @@ const Map<String, Map<String, String>> translations = {
     'sync_done': 'Η διαδικασία ολοκληρώθηκε επιτυχώς!',
     'sync_err': 'Σφάλμα κατά τη διαδικασία: ',
     'sync_no_ext': 'Δεν βρέθηκε εξωτερικός χώρος αποθήκευσης.',
+    'relink_title': 'Αρχεία που λείπουν',
+    'relink_msg': 'Κάποια βίντεο μετακινήθηκαν ή διαγράφηκαν. Η εφαρμογή θα προσπαθήσει να τα βρει αυτόματα.',
+    'relink_searching': 'Αναζήτηση: {name}',
+    'relink_failed': 'Το αρχείο δεν βρέθηκε αυτόματα. Παρακαλώ εντοπίστε το χειροκίνητα:',
+    'relink_manual_btn': 'ΕΠΙΛΟΓΗ ΑΡΧΕΙΟΥ',
+    'relink_info': 'Διάρκεια: {dur} | Μέγεθος: {size} MB',
   },
   'en': {
     'title': 'Highlight Manager',
@@ -235,6 +248,19 @@ const Map<String, Map<String, String>> translations = {
     'cancelling': 'CANCELLING...',
     'cancel_confirm_title': 'Cancel Analysis',
     'cancel_confirm_msg': 'Are you sure you want to cancel the analysis?',
+    'relink_title': 'Missing Files',
+    'relink_msg': 'Some videos were moved or deleted. The app will try to find them automatically.',
+    'relink_searching': 'Searching: {name}',
+    'relink_failed': 'File not found automatically. Please locate it manually:',
+    'relink_manual_btn': 'SELECT FILE',
+    'relink_info': 'Duration: {dur} | Size: {size} MB',
+    'sync_title': 'Sync Project',
+    'sync_info': 'Select Backup to export to PC or Restore to import your data (JSON and Thumbnails).',
+    'backup_btn': 'BACKUP TO PC',
+    'restore_btn': 'RESTORE FROM PC',
+    'sync_done': 'Process completed successfully!',
+    'sync_err': 'Error during process: ',
+    'sync_no_ext': 'No external storage found.',
   }
 };
 
@@ -380,7 +406,10 @@ class AppState extends ChangeNotifier {
           final file = File('${entity.path}/project.json');
           if (await file.exists()) {
             final content = await file.readAsString();
-            projects.add(Project.fromJson(jsonDecode(content)));
+            final p = Project.fromJson(jsonDecode(content));
+            if (!projects.any((existing) => existing.id == p.id)) {
+              projects.add(p);
+            }
           }
         } else if (entity is File && entity.path.endsWith('.json') && !entity.path.contains('_analysis')) {
           // Migration παλιών flat αρχείων στον νέο φάκελο
@@ -389,7 +418,9 @@ class AppState extends ChangeNotifier {
           final pDir = Directory('${dir.path}/${p.id}');
           if (!await pDir.exists()) await pDir.create();
           await File('${pDir.path}/project.json').writeAsString(content);
-          projects.add(p);
+          if (!projects.any((existing) => existing.id == p.id)) {
+            projects.add(p);
+          }
           try { await entity.delete(); } catch(_) {}
         }
       }
@@ -459,6 +490,130 @@ class AppState extends ChangeNotifier {
       }
       return false;
     });
+  }
+
+  // --- SMART RELINK LOGIC ---
+
+  Future<String?> _tryAutoRelinkNative(String filename, double duration, int size) async {
+    if (Platform.isAndroid) {
+      try {
+        // Καθαρισμός ονόματος: Αν είναι URI encoded, το αποκωδικοποιούμε για να βρούμε το πραγματικό display name
+        String cleanName = filename;
+        try {
+          if (filename.contains('%')) {
+            cleanName = Uri.decodeComponent(filename).split('/').last;
+          }
+        } catch (_) {}
+
+        print('[RELINK] Calling native findVideo:');
+        print('  - Original: $filename');
+        print('  - Clean Name: $cleanName');
+        print('  - Duration: $duration s');
+        print('  - Size: $size bytes');
+
+        const platform = MethodChannel('com.example.highlight_manager/native_picker');
+        final String? result = await platform.invokeMethod('findVideo', {
+          'name': cleanName,
+          'duration': (duration * 1000).toInt(),
+          'size': size <= 0 ? -1 : size, // Αν το size είναι 0, στέλνουμε -1 για να το αγνοήσει ο native κώδικας
+        });
+        
+        print('[RELINK] Native Result: $result');
+        return result;
+      } catch (e) {
+        debugPrint('Error in native findVideo: $e');
+      }
+    } else if (Platform.isIOS) {
+      // TODO: Μελλοντική υλοποίηση για εύρεση βίντεο στο iOS (π.χ. μέσω Photos framework)
+      return null;
+    } else if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+      // Λογική για Desktop: Σάρωση τυπικών φακέλων (Videos, Downloads κλπ)
+      try {
+        List<Directory> searchDirs = [];
+        final home = Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'];
+        if (home != null) {
+          searchDirs.add(Directory('$home/Videos'));
+          searchDirs.add(Directory('$home/Downloads'));
+          searchDirs.add(Directory('$home/Documents'));
+        }
+        
+        for (var dir in searchDirs) {
+          if (!dir.existsSync()) continue;
+          final files = dir.listSync(recursive: true, followLinks: false);
+          for (var entity in files) {
+            if (entity is File && entity.path.split(Platform.pathSeparator).last == filename) {
+              // Έλεγχος μεγέθους (Bytes) - Αν έχουμε μέγεθος, πρέπει να είναι ίδιο.
+              if (size > 0) {
+                if (entity.lengthSync() == size) return entity.path;
+              } else {
+                return entity.path;
+              }
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('Error in desktop auto-relink: $e');
+      }
+    }
+    return null;
+  }
+
+  Future<bool> verifyAndRelink(Project project, {Function(String)? onStatusUpdate}) async {
+    bool changed = false;
+    bool allFound = true;
+    for (int i = 0; i < project.videoPaths.length; i++) {
+      final path = project.videoPaths[i];
+      
+      // Έλεγχος αν το αρχείο είναι προσβάσιμο
+      bool exists = false;
+      if (path.startsWith('content://')) {
+        try {
+          const platform = MethodChannel('com.example.highlight_manager/native_picker');
+          exists = await platform.invokeMethod('checkFileExists', {'path': path}) ?? false;
+        } catch (_) { exists = false; }
+      } else {
+        exists = File(path).existsSync();
+      }
+      
+      if (!exists) {
+        // Αν το path είναι content://, το όνομα αρχείου βρίσκεται συχνά μετά το τελευταίο '%2F' ή '/'
+        String filename = path.split(RegExp(r'[\\/]')).last;
+        if (path.startsWith('content://')) {
+          try {
+            filename = Uri.decodeComponent(path).split('/').last;
+          } catch (_) {}
+        }
+        
+        String displayFilename = filename;
+        onStatusUpdate?.call(t('relink_searching').replaceAll('{name}', displayFilename));
+        
+        final dur = project.videoDurations.length > i ? project.videoDurations[i] : 0.0;
+        final size = project.videoSizes.length > i ? project.videoSizes[i] : 0;
+
+        String? newPath = await _tryAutoRelinkNative(filename, dur, size);
+        
+        bool newExists = false;
+        if (newPath != null) {
+          if (newPath.startsWith('content://')) {
+            try {
+              const platform = MethodChannel('com.example.highlight_manager/native_picker');
+              newExists = await platform.invokeMethod('checkFileExists', {'path': newPath}) ?? false;
+            } catch (_) {}
+          } else {
+            newExists = File(newPath).existsSync();
+          }
+        }
+
+        if (newExists && newPath != null) {
+          project.videoPaths[i] = newPath;
+          changed = true;
+        } else {
+          allFound = false; // Δεν το βρήκε, αλλά ΣΥΝΕΧΙΖΕΙ την αναζήτηση για τα επόμενα
+        }
+      }
+    }
+    if (changed) await saveProject(project);
+    return allFound;
   }
 
   bool _isAnalysisCancelled = false;
@@ -553,6 +708,7 @@ class AppState extends ChangeNotifier {
 
     double totalDur = 0.0;
     List<double> videoDurations = [];
+    List<int> videoSizes = [];
     
     List<double> allRms = [];
     List<double> allTimes = [];
@@ -584,8 +740,12 @@ class AppState extends ChangeNotifier {
         
         if (dur <= 0.0) dur = 1.0; 
 
+        int sizeInBytes = 0;
+        try { sizeInBytes = File(path).lengthSync(); } catch (_) {}
+
         totalDur += dur;
         videoDurations.add(dur);
+        videoSizes.add(sizeInBytes);
       }
 
       print('[ANALYZE] Υπολογισμός διάρκειας ολοκληρώθηκε σε ${stepStopwatch.elapsedMilliseconds}ms. Συνολική διάρκεια: $totalDur s');
@@ -801,6 +961,7 @@ class AppState extends ChangeNotifier {
         name: finalName,
         videoPaths: paths,
         videoDurations: videoDurations,
+        videoSizes: videoSizes,
         totalDuration: totalDur,
         sensitivity: bestSensitivity,
       );
@@ -1642,74 +1803,173 @@ class HomeScreen extends StatelessWidget {
         elevation: 2,
         actions: [
           IconButton(
-            icon: const Icon(Icons.bug_report),
-            tooltip: 'Εξαγωγή JSON Αναλύσεων',
+            icon: const Icon(Icons.sync),
+            tooltip: state.t('sync_title'),
             onPressed: () async {
               print('----------------------------------------------------');
-              print('[USER ACTION] Πάτησες το "Ζουζούνι" (Bug Report / Export)');
+              print('[USER ACTION] Πάτησες το Sync (Backup/Restore)');
               print('----------------------------------------------------');
-              try {
-                // Χρήση του εξωτερικού φακέλου της εφαρμογής που είναι ορατός μέσω USB
-                final extDir = await getExternalStorageDirectory();
-                if (extDir == null) {
-                  if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Δεν βρέθηκε εξωτερικός χώρος')));
-                  return;
+              
+              Future<void> performBackup() async {
+                try {
+                  final extDir = await getExternalStorageDirectory();
+                  if (extDir == null) throw Exception('Δεν βρέθηκε εξωτερικός χώρος');
+                  final exportPath = '${extDir.path}/JSON_Exports';
+                  final exportDir = Directory(exportPath);
+                  if (!exportDir.existsSync()) exportDir.createSync(recursive: true);
+
+                  final appDir = await getApplicationDocumentsDirectory();
+                  final hmDir = Directory('${appDir.path}/HighlightManager');
+                  int count = 0;
+
+                  if (hmDir.existsSync()) {
+                    for (var entity in hmDir.listSync()) {
+                      if (entity is Directory) {
+                        final projectFile = File('${entity.path}/project.json');
+                        if (projectFile.existsSync()) {
+                          String pName = entity.path.split(Platform.pathSeparator).last;
+                          try { pName = jsonDecode(projectFile.readAsStringSync())['name'] ?? pName; } catch(_) {}
+                          final safeName = pName.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
+                          
+                          final projectExportDir = Directory('$exportPath/$safeName');
+                          if (!projectExportDir.existsSync()) projectExportDir.createSync(recursive: true);
+                          
+                          for (String f in ['project.json', 'analysis.json', 'thumb_0.jpg', 'thumb_1.jpg', 'thumb_2.jpg', 'thumb_3.jpg']) {
+                            final sourceFile = File('${entity.path}/$f');
+                            if (sourceFile.existsSync()) sourceFile.copySync('${projectExportDir.path}/$f');
+                          }
+                          count++;
+                        }
+                      }
+                    }
+                  }
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('✅ Έγινε Backup $count Projects!\nΒρίσκονται στο:\n$exportPath'), duration: const Duration(seconds: 5)));
+                  }
+                } catch (e) {
+                  if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('❌ Σφάλμα Backup: $e')));
                 }
+              }
 
-                final exportPath = '${extDir.path}/JSON_Exports';
-                final exportDir = Directory(exportPath);
-                if (!exportDir.existsSync()) exportDir.createSync();
+              Future<void> performRestore() async {
+                try {
+                  final extDir = await getExternalStorageDirectory();
+                  if (extDir == null) throw Exception('Δεν βρέθηκε εξωτερικός χώρος');
+                  final exportDir = Directory('${extDir.path}/JSON_Exports');
+                  if (!exportDir.existsSync()) {
+                    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Δεν βρέθηκε φάκελος Backup!')));
+                    return;
+                  }
 
-                final appDir = await getApplicationDocumentsDirectory();
-                final hmDir = Directory('${appDir.path}/HighlightManager');
-                int count = 0;
+                  final appDir = await getApplicationDocumentsDirectory();
+                  final hmDir = Directory('${appDir.path}/HighlightManager');
+                  if (!hmDir.existsSync()) hmDir.createSync(recursive: true);
 
-                if (hmDir.existsSync()) {
-                  for (var entity in hmDir.listSync()) {
+                  int count = 0;
+                  for (var entity in exportDir.listSync()) {
                     if (entity is Directory) {
-                      final analysisFile = File('${entity.path}/analysis.json');
-                      final projectFile = File('${entity.path}/project.json');
-                      final errFile = File('${entity.path}/ffmpeg_error.txt');
-                      if (analysisFile.existsSync() && projectFile.existsSync()) {
-                        String pName = entity.path.split(Platform.pathSeparator).last;
-                        try {
-                          final pData = jsonDecode(projectFile.readAsStringSync());
-                          pName = pData['name'] ?? pName;
-                        } catch(_) {}
-                        final safeName = pName.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
-                        
-                        // Δημιουργία ξεχωριστού φακέλου για το Project
-                        final projectExportDir = Directory('$exportPath/$safeName');
-                        if (!projectExportDir.existsSync()) {
-                          projectExportDir.createSync(recursive: true);
+                      final pFile = File('${entity.path}/project.json');
+                      if (pFile.existsSync()) {
+                        final pData = jsonDecode(pFile.readAsStringSync());
+                        Project importedProject = Project.fromJson(pData);
+                        String targetId = importedProject.id;
+                        String targetName = importedProject.name;
+
+                        Project? conflict;
+                        try { conflict = state.projects.firstWhere((p) => p.id == targetId || p.name == targetName); } catch (_) {}
+
+                        if (conflict != null) {
+                          String? action = await showDialog<String>(
+                            context: context,
+                            barrierDismissible: false,
+                            builder: (ctx) => AlertDialog(
+                              title: const Text('Διπλότυπο Project', style: TextStyle(fontWeight: FontWeight.bold)),
+                              content: Text('Το project "${importedProject.name}" υπάρχει ήδη στη συσκευή.\nΤι θέλετε να κάνετε;'),
+                              actions: [
+                                TextButton(onPressed: () => Navigator.pop(ctx, 'skip'), child: const Text('ΠΑΡΑΛΕΙΨΗ')),
+                                FilledButton(onPressed: () => Navigator.pop(ctx, 'copy'), child: const Text('ΑΝΤΙΓΡΑΦΟ')),
+                                FilledButton(
+                                  style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+                                  onPressed: () => Navigator.pop(ctx, 'replace'),
+                                  child: const Text('ΑΝΤΙΚΑΤΑΣΤΑΣΗ'),
+                                ),
+                              ],
+                            ),
+                          );
+
+                          if (action == 'skip' || action == null) continue;
+
+                          if (action == 'copy') {
+                            targetId = DateTime.now().millisecondsSinceEpoch.toString();
+                            int c = 1;
+                            String bName = targetName;
+                            while (state.projects.any((p) => p.name == targetName)) {
+                              targetName = '$bName ($c)';
+                              c++;
+                            }
+                            importedProject.id = targetId;
+                            importedProject.name = targetName;
+                          } else if (action == 'replace') {
+                            targetId = conflict.id; 
+                            importedProject.id = targetId;
+                          }
                         }
-                        
-                        // Εξαγωγή του Project (Backup) στον δικό του φάκελο
-                        projectFile.copySync('${projectExportDir.path}/project.json');
-                        
-                        // Εξαγωγή της Ανάλυσης στον ίδιο φάκελο
-                        if (analysisFile.existsSync()) {
-                          analysisFile.copySync('${projectExportDir.path}/analysis.json');
+
+                        final targetDir = Directory('${hmDir.path}/$targetId');
+                        if (!targetDir.existsSync()) targetDir.createSync(recursive: true);
+
+                        File('${targetDir.path}/project.json').writeAsStringSync(jsonEncode(importedProject.toJson()));
+                        for (String f in ['analysis.json', 'thumb_0.jpg', 'thumb_1.jpg', 'thumb_2.jpg', 'thumb_3.jpg']) {
+                          final sf = File('${entity.path}/$f');
+                          if (sf.existsSync()) sf.copySync('${targetDir.path}/$f');
                         }
-                        
                         count++;
                       }
                     }
                   }
-                }
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('✅ Έγινε Backup $count Projects σε φακέλους!\nΒρίσκονται στο:\n$exportPath'),
-                      duration: const Duration(seconds: 8),
-                    )
-                  );
-                }
-              } catch (e) {
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('❌ Σφάλμα: $e')));
+                  await state.loadAllProjects();
+                  if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('✅ Εισαγωγή $count Projects ολοκληρώθηκε!')));
+                } catch (e) {
+                  if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('❌ Σφάλμα Εισαγωγής: $e')));
                 }
               }
+
+              showDialog(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: Text(state.t('sync_title'), style: const TextStyle(fontWeight: FontWeight.bold)),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(state.t('sync_info')),
+                      const SizedBox(height: 24),
+                      FilledButton.icon(
+                        icon: const Icon(Icons.upload_file),
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          performBackup();
+                        },
+                        label: const Text('BACKUP'),
+                      ),
+                      const SizedBox(height: 8),
+                      FilledButton.tonalIcon(
+                        icon: const Icon(Icons.download),
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          performRestore();
+                        },
+                        label: const Text('RESTORE'),
+                      ),
+                      const SizedBox(height: 8),
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx), 
+                        child: Text(state.t('cancel'))
+                      ),
+                    ],
+                  ),
+                )
+              );
             },
           ),
           IconButton(
@@ -2210,6 +2470,8 @@ class _EditorScreenState extends State<EditorScreen> {
   bool isAutoplaySuspended = false;
   bool isSeeking = false;
   bool isFullscreen = false;
+  bool isRelinking = false;
+  String relinkStatus = "";
   
   List<HighlightPhase> historyStack = [];
   List<HighlightPhase> forwardStack = [];
@@ -2277,6 +2539,8 @@ class _EditorScreenState extends State<EditorScreen> {
       widget.project.videoDurations = List.filled(widget.project.videoPaths.length, avg);
     }
 
+    _startEditorSession();
+
     positionSub = player.stream.position.listen((pos) {
       if (!mounted) return;
       
@@ -2325,12 +2589,179 @@ class _EditorScreenState extends State<EditorScreen> {
       }
     });
     
-    if (widget.project.videoPaths.isNotEmpty) {
-      final playlist = Playlist(widget.project.videoPaths.map((p) => Media(p)).toList());
-      player.open(playlist, play: false);
-    }
+  }
+
+  Future<void> _startEditorSession() async {
+    final state = Provider.of<AppState>(context, listen: false);
     
-    _loadAnalysisData();
+    setState(() {
+      isRelinking = true;
+      relinkStatus = state.t('preparation');
+    });
+
+    bool ok = await state.verifyAndRelink(
+      widget.project, 
+      onStatusUpdate: (s) => setState(() => relinkStatus = s),
+    );
+
+    // Απενεργοποιούμε το "Relinking" UI πριν δείξουμε διαλόγους ή ανοίξουμε τον editor
+    if (mounted) setState(() => isRelinking = false);
+
+    if (!ok && mounted) {
+      for (int i = 0; i < widget.project.videoPaths.length; i++) {
+        final path = widget.project.videoPaths[i];
+        
+        bool exists = false;
+        if (path.startsWith('content://')) {
+          try {
+            const platform = MethodChannel('com.example.highlight_manager/native_picker');
+            exists = await platform.invokeMethod('checkFileExists', {'path': path}) ?? false;
+          } catch (_) { exists = false; }
+        } else {
+          exists = File(path).existsSync();
+        }
+        
+        if (!exists) {
+          final filename = path.split(RegExp(r'[\\/]')).last;
+          final dur = widget.project.videoDurations.length > i ? widget.project.videoDurations[i] : 0.0;
+          final size = widget.project.videoSizes.length > i ? widget.project.videoSizes[i] : 0;
+          
+          final newPath = await _showManualRelinkDialog(filename, dur, size);
+          if (newPath != null) {
+            // Έλεγχος διάρκειας για ασφάλεια
+            final tempPlayer = Player();
+            await tempPlayer.open(Media(newPath), play: false);
+            await Future.delayed(const Duration(milliseconds: 500));
+            double newDur = tempPlayer.state.duration.inSeconds.toDouble();
+            await tempPlayer.dispose();
+
+            if ((newDur - dur).abs() > 2.0) { // Επιτρέπουμε απόκλιση 2 δευτερολέπτων
+               bool? confirm = await showDialog<bool>(
+                 context: context,
+                 builder: (ctx) => AlertDialog(
+                   title: const Text('Προσοχή!'),
+                   content: Text('Το βίντεο που επιλέξατε έχει διάρκεια ${newDur.toInt()}s, ενώ το αρχικό ήταν ${dur.toInt()}s. '
+                                'Αυτό μπορεί να χαλάσει τις φάσεις. Θέλετε να συνεχίσετε;'),
+                   actions: [
+                     TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('ΟΧΙ')),
+                     FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('ΝΑΙ')),
+                   ],
+                 ),
+               );
+               if (confirm != true) { i--; continue; } // Ξαναζητάμε το ίδιο αρχείο
+            }
+
+            widget.project.videoPaths[i] = newPath;
+            
+            // Ενημέρωση μεγέθους και διάρκειας για να δουλεύει το auto-relink στο μέλλον
+            if (widget.project.videoSizes.length > i) {
+               try {
+                 if (newPath.startsWith('content://')) {
+                    // Χρήση του native channel για λήψη μεγέθους από content URI
+                    const platform = MethodChannel('com.example.highlight_manager/native_picker');
+                    final int? actualSize = await platform.invokeMethod('getFileSize', {'path': newPath});
+                    if (actualSize != null) widget.project.videoSizes[i] = actualSize;
+                 } else {
+                   widget.project.videoSizes[i] = File(newPath).lengthSync();
+                 }
+               } catch (_) {}
+            }
+            if (widget.project.videoDurations.length > i) {
+               widget.project.videoDurations[i] = newDur;
+            }
+            
+            await state.saveProject(widget.project);
+          } else {
+            if (mounted) Navigator.pop(context);
+            return;
+          }
+        }
+      }
+    }
+
+    if (mounted) {
+      if (widget.project.videoPaths.isNotEmpty) {
+        final playlist = Playlist(widget.project.videoPaths.map((p) => Media(p)).toList());
+        player.open(playlist, play: false);
+      }
+      _loadAnalysisData();
+    }
+  }
+
+  Future<String?> _showManualRelinkDialog(String filename, double duration, int size) async {
+    final state = Provider.of<AppState>(context, listen: false);
+    final mb = (size / (1024 * 1024)).toStringAsFixed(1);
+    final durStr = _formatDuration(Duration(seconds: duration.toInt()));
+
+    String cleanName = filename;
+    try {
+      cleanName = Uri.decodeComponent(filename).split(RegExp(r'[\\/]')).last;
+    } catch (_) {}
+
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: Text(state.t('relink_title'), style: const TextStyle(fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(state.t('relink_failed')),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.errorContainer.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Theme.of(context).colorScheme.error.withOpacity(0.5)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(cleanName, style: const TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.copy, size: 18),
+                        constraints: const BoxConstraints(),
+                        padding: const EdgeInsets.all(4),
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: cleanName));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Αντιγράφηκε!'), duration: Duration(seconds: 1)),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(state.t('relink_info').replaceAll('{dur}', durStr).replaceAll('{size}', mb),
+                       style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, null), child: Text(state.t('cancel'))),
+          FilledButton(
+            onPressed: () async {
+              FilePickerResult? result = await FilePicker.platform.pickFiles(
+                type: FileType.video,
+                dialogTitle: 'Επιλέξτε το αρχείο: $filename',
+              );
+              if (result != null && result.files.single.path != null) {
+                Navigator.pop(ctx, result.files.single.path);
+              }
+            },
+            child: Text(state.t('relink_manual_btn')),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _loadAnalysisData() async {
@@ -4193,6 +4624,21 @@ class _EditorScreenState extends State<EditorScreen> {
     final iconSize = isDesktop ? 28.0 : 24.0;
     final topActionFontSize = isDesktop ? 18.0 : 15.0;
     final horizontalPadding = isDesktop ? 16.0 : 8.0;
+
+    if (isRelinking) {
+      return Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 24),
+              Text(relinkStatus, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            ],
+          ),
+        ),
+      );
+    }
 
     if (isFullscreen) {
       return Scaffold(
