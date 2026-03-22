@@ -207,6 +207,9 @@ const Map<String, Map<String, String>> translations = {
     'relink_failed': 'Το αρχείο δεν βρέθηκε αυτόματα. Παρακαλώ εντοπίστε το χειροκίνητα:',
     'relink_manual_btn': 'ΕΠΙΛΟΓΗ ΑΡΧΕΙΟΥ',
     'relink_info': 'Διάρκεια: {dur} | Μέγεθος: {size} MB',
+    'relink_progress': 'Συνδέθηκαν {count} από {total} αρχεία',
+    'relink_copy_name': 'Αντιγραφή Ονόματος',
+    'relink_start_editor': 'ΕΝΑΡΞΗ EDITOR',
   },
   'en': {
     'title': 'Highlight Manager',
@@ -254,6 +257,9 @@ const Map<String, Map<String, String>> translations = {
     'relink_failed': 'File not found automatically. Please locate it manually:',
     'relink_manual_btn': 'SELECT FILE',
     'relink_info': 'Duration: {dur} | Size: {size} MB',
+    'relink_progress': 'Linked {count} of {total} files',
+    'relink_copy_name': 'Copy Name',
+    'relink_start_editor': 'START EDITOR',
     'sync_title': 'Sync Project',
     'sync_info': 'Select Backup to export to PC or Restore to import your data (JSON and Thumbnails).',
     'backup_btn': 'BACKUP TO PC',
@@ -494,138 +500,21 @@ class AppState extends ChangeNotifier {
 
   // --- SMART RELINK LOGIC ---
 
-  Future<String?> _tryAutoRelinkNative(String filename, double duration, int size) async {
-    if (Platform.isAndroid) {
+  Future<bool> checkFileExists(String path) async {
+    if (path.startsWith('content://')) {
       try {
-        // Καθαρισμός ονόματος: Αν είναι URI encoded, το αποκωδικοποιούμε για να βρούμε το πραγματικό display name
-        String cleanName = filename;
-        try {
-          if (filename.contains('%')) {
-            cleanName = Uri.decodeComponent(filename).split('/').last;
-          }
-        } catch (_) {}
-
-        print('[RELINK] Calling native findVideo:');
-        print('  - Original: $filename');
-        print('  - Clean Name: $cleanName');
-        print('  - Duration: $duration s');
-        print('  - Size: $size bytes');
-
         const platform = MethodChannel('com.example.highlight_manager/native_picker');
-        final String? result = await platform.invokeMethod('findVideo', {
-          'name': cleanName,
-          'duration': (duration * 1000).toInt(),
-          'size': size <= 0 ? -1 : size, // Αν το size είναι 0, στέλνουμε -1 για να το αγνοήσει ο native κώδικας
-        });
-        
-        print('[RELINK] Native Result: $result');
-        return result;
-      } catch (e) {
-        debugPrint('Error in native findVideo: $e');
-      }
-    } else if (Platform.isIOS) {
-      // TODO: Μελλοντική υλοποίηση για εύρεση βίντεο στο iOS (π.χ. μέσω Photos framework)
-      return null;
-    } else if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
-      // Λογική για Desktop: Σάρωση τυπικών φακέλων (Videos, Downloads κλπ)
-      try {
-        List<Directory> searchDirs = [];
-        final home = Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'];
-        if (home != null) {
-          searchDirs.add(Directory('$home/Videos'));
-          searchDirs.add(Directory('$home/Downloads'));
-          searchDirs.add(Directory('$home/Documents'));
-        }
-        
-        for (var dir in searchDirs) {
-          if (!dir.existsSync()) continue;
-          final files = dir.listSync(recursive: true, followLinks: false);
-          for (var entity in files) {
-            if (entity is File && entity.path.split(Platform.pathSeparator).last == filename) {
-              // Έλεγχος μεγέθους (Bytes) - Αν έχουμε μέγεθος, πρέπει να είναι ίδιο.
-              if (size > 0) {
-                if (entity.lengthSync() == size) return entity.path;
-              } else {
-                return entity.path;
-              }
-            }
-          }
-        }
-      } catch (e) {
-        debugPrint('Error in desktop auto-relink: $e');
-      }
+        return await platform.invokeMethod('checkFileExists', {'path': path}) ?? false;
+      } catch (_) { return false; }
     }
-    return null;
+    return File(path).existsSync();
   }
 
-  Future<bool> verifyAndRelink(Project project, {Function(String)? onStatusUpdate}) async {
-    bool changed = false;
-    bool allFound = true;
+  Future<bool> verifyAndRelink(Project project) async {
     for (int i = 0; i < project.videoPaths.length; i++) {
-      final path = project.videoPaths[i];
-      
-      // Έλεγχος αν το αρχείο είναι προσβάσιμο
-      bool exists = false;
-      if (path.startsWith('content://')) {
-        try {
-          const platform = MethodChannel('com.example.highlight_manager/native_picker');
-          exists = await platform.invokeMethod('checkFileExists', {'path': path}) ?? false;
-        } catch (_) { exists = false; }
-      } else {
-        exists = File(path).existsSync();
-      }
-      
-      if (!exists) {
-        // Αν το path είναι content://, το όνομα αρχείου βρίσκεται συχνά μετά το τελευταίο '%2F' ή '/'
-        String filename = path.split(RegExp(r'[\\/]')).last;
-        if (path.startsWith('content://')) {
-          try {
-            filename = Uri.decodeComponent(path).split('/').last;
-          } catch (_) {}
-        }
-        
-        String displayFilename = filename;
-        onStatusUpdate?.call(t('relink_searching').replaceAll('{name}', displayFilename));
-        
-        final dur = project.videoDurations.length > i ? project.videoDurations[i] : 0.0;
-        final size = project.videoSizes.length > i ? project.videoSizes[i] : 0;
-
-        String? newPath = await _tryAutoRelinkNative(filename, dur, size);
-        
-        bool newExists = false;
-        if (newPath != null) {
-          if (newPath.startsWith('content://')) {
-            try {
-              const platform = MethodChannel('com.example.highlight_manager/native_picker');
-              newExists = await platform.invokeMethod('checkFileExists', {'path': newPath}) ?? false;
-            } catch (_) {}
-          } else {
-            newExists = File(newPath).existsSync();
-          }
-        }
-
-        if (newExists && newPath != null) {
-          project.videoPaths[i] = newPath;
-          
-          // Ενημέρωση μεγέθους στα metadata για να λειτουργεί σωστά η ανίχνευση στο μέλλον 
-          try {
-            if (newPath.startsWith('content://')) {
-              const platform = MethodChannel('com.example.highlight_manager/native_picker');
-              final int? actualSize = await platform.invokeMethod('getFileSize', {'path': newPath});
-              if (actualSize != null) project.videoSizes[i] = actualSize;
-            } else {
-              project.videoSizes[i] = File(newPath).lengthSync();
-            }
-          } catch (_) {}
-
-          changed = true;
-        } else {
-          allFound = false; // Δεν το βρήκε, αλλά ΣΥΝΕΧΙΖΕΙ την αναζήτηση για τα επόμενα
-        }
-      }
+      if (!await checkFileExists(project.videoPaths[i])) return false;
     }
-    if (changed) await saveProject(project);
-    return allFound;
+    return true;
   }
 
   bool _isAnalysisCancelled = false;
@@ -2455,6 +2344,212 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
   }
 }
 
+class ManualRelinkPanel extends StatefulWidget {
+  final Project project;
+  final AppState state;
+  const ManualRelinkPanel({super.key, required this.project, required this.state});
+
+  @override
+  State<ManualRelinkPanel> createState() => _ManualRelinkPanelState();
+}
+
+class _ManualRelinkPanelState extends State<ManualRelinkPanel> {
+  late List<bool> _fileStatus;
+  final Map<int, bool> _copiedStatus = {}; // Feedback για την αντιγραφή
+
+  @override
+  void initState() {
+    super.initState();
+    // Προσθήκη default τιμών στα metadata αν λείπουν, για αποφυγή RangeError σε παλιά projects
+    while (widget.project.videoDurations.length < widget.project.videoPaths.length) {
+      widget.project.videoDurations.add(0.0);
+    }
+    while (widget.project.videoSizes.length < widget.project.videoPaths.length) {
+      widget.project.videoSizes.add(0);
+    }
+    _fileStatus = List.filled(widget.project.videoPaths.length, false);
+    _refreshStatus();
+  }
+
+  void _refreshStatus() async {
+    for (int i = 0; i < widget.project.videoPaths.length; i++) {
+      bool exists = await widget.state.checkFileExists(widget.project.videoPaths[i]);
+      if (mounted) setState(() => _fileStatus[i] = exists);
+    }
+  }
+
+  String _formatDuration(Duration d) {
+    int m = d.inMinutes.remainder(60);
+    int s = d.inSeconds.remainder(60);
+    return "${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}";
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = widget.state.t;
+    int linkedCount = _fileStatus.where((s) => s).length;
+    bool allDone = linkedCount == _fileStatus.length;
+
+    return AlertDialog(
+      title: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(t('relink_title'), style: const TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 4),
+          Text(
+            t('relink_progress').replaceAll('{count}', '$linkedCount').replaceAll('{total}', '${_fileStatus.length}'),
+            style: TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.bold),
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.65),
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: widget.project.videoPaths.length,
+            itemBuilder: (ctx, i) {
+              final path = widget.project.videoPaths[i];
+              final isLinked = _fileStatus[i];
+              
+              String filename = path.split(RegExp(r'[\\/]')).last;
+              if (path.startsWith('content://')) {
+                try { filename = Uri.decodeComponent(path).split('/').last; } catch (_) {}
+              }
+
+              // Ασφαλής ανάγνωση metadata με fallback τιμές
+              final double currentDur = i < widget.project.videoDurations.length ? widget.project.videoDurations[i] : 0.0;
+              final int currentSize = i < widget.project.videoSizes.length ? widget.project.videoSizes[i] : 0;
+              
+              final durStr = _formatDuration(Duration(seconds: currentDur.toInt()));
+              final mb = (currentSize / (1024 * 1024)).toStringAsFixed(1);
+
+              return Card(
+                elevation: 0,
+                margin: const EdgeInsets.symmetric(vertical: 6),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(
+                    color: isLinked ? Colors.green : Theme.of(context).colorScheme.error,
+                    width: 2,
+                  ),
+                ),
+                color: isLinked ? Colors.green.withOpacity(0.05) : Theme.of(context).colorScheme.errorContainer.withOpacity(0.1),
+                child: Padding(
+                  padding: const EdgeInsets.all(12.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(isLinked ? Icons.check_circle : Icons.error_outline, color: isLinked ? Colors.green : Colors.red),
+                          const SizedBox(width: 8),
+                          Expanded(child: Text(filename, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
+                          IconButton(
+                            icon: const Icon(Icons.copy, size: 20),
+                            style: IconButton.styleFrom(
+                              backgroundColor: _copiedStatus[i] == true 
+                                ? Colors.grey.withOpacity(0.4) 
+                                : Colors.grey.withOpacity(0.1),
+                            ),
+                            tooltip: t('relink_copy_name'),
+                            onPressed: () {
+                              Clipboard.setData(ClipboardData(text: filename));
+                              setState(() => _copiedStatus[i] = true);
+                              Future.delayed(const Duration(milliseconds: 400), () {
+                                if (mounted) setState(() => _copiedStatus[i] = false);
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                      Text(t('relink_info').replaceAll('{dur}', durStr).replaceAll('{size}', mb), style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.tonalIcon(
+                          onPressed: () async {
+                            String? newPath;
+                            if (Platform.isAndroid) {
+                              try {
+                                const platform = MethodChannel('com.example.highlight_manager/native_picker');
+                                final List<dynamic>? result = await platform.invokeListMethod('pickVideos');
+                                if (result != null && result.isNotEmpty) {
+                                  final map = Map<String, String>.from(result.first);
+                                  newPath = map['path'];
+                                }
+                              } catch (_) {}
+                            } else {
+                              FilePickerResult? result = await FilePicker.platform.pickFiles(
+                                type: FileType.video,
+                                allowMultiple: false,
+                              );
+                              if (result != null && result.files.isNotEmpty) {
+                                newPath = result.files.single.path;
+                              }
+                            }
+
+                            if (newPath != null && mounted) {
+                              // Ενημέρωση UI ακαριαία: Εφόσον το διάλεξε ο χρήστης, το αρχείο υπάρχει.
+                              setState(() {
+                                widget.project.videoPaths[i] = newPath!;
+                                _fileStatus[i] = true; 
+                              });
+
+                              while (widget.project.videoSizes.length <= i) widget.project.videoSizes.add(0);
+                              while (widget.project.videoDurations.length <= i) widget.project.videoDurations.add(0.0);
+                              
+                              try {
+                                if (newPath.startsWith('content://')) {
+                                  const platform = MethodChannel('com.example.highlight_manager/native_picker');
+                                  final int? size = await platform.invokeMethod('getFileSize', {'path': newPath});
+                                  if (size != null) widget.project.videoSizes[i] = size;
+                                } else {
+                                  widget.project.videoSizes[i] = File(newPath).lengthSync();
+                                }
+                              } catch (_) {}
+                              
+                              await widget.state.saveProject(widget.project);
+                              _refreshStatus(); // Επιβεβαίωση στο παρασκήνιο
+                            }
+                          },
+                          icon: const Icon(Icons.folder_open, size: 18),
+                          label: Text(t('relink_manual_btn')),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+      actions: [
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(
+              height: 50,
+              child: FilledButton(
+                onPressed: allDone ? () => Navigator.pop(context, true) : null,
+                child: Text(t('relink_start_editor'), style: const TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: () => Navigator.pop(context, false), 
+              child: Text(t('cancel'), style: const TextStyle(color: Colors.grey))
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
 class EditorScreen extends StatefulWidget {
   final Project project;
   const EditorScreen({super.key, required this.project});
@@ -2606,88 +2701,18 @@ class _EditorScreenState extends State<EditorScreen> {
   Future<void> _startEditorSession() async {
     final state = Provider.of<AppState>(context, listen: false);
     
-    setState(() {
-      isRelinking = true;
-      relinkStatus = state.t('preparation');
-    });
+    bool allOk = await state.verifyAndRelink(widget.project);
 
-    bool ok = await state.verifyAndRelink(
-      widget.project, 
-      onStatusUpdate: (s) => setState(() => relinkStatus = s),
-    );
-
-    // Απενεργοποιούμε το "Relinking" UI πριν δείξουμε διαλόγους ή ανοίξουμε τον editor
-    if (mounted) setState(() => isRelinking = false);
-
-    if (!ok && mounted) {
-      for (int i = 0; i < widget.project.videoPaths.length; i++) {
-        final path = widget.project.videoPaths[i];
-        
-        bool exists = false;
-        if (path.startsWith('content://')) {
-          try {
-            const platform = MethodChannel('com.example.highlight_manager/native_picker');
-            exists = await platform.invokeMethod('checkFileExists', {'path': path}) ?? false;
-          } catch (_) { exists = false; }
-        } else {
-          exists = File(path).existsSync();
-        }
-        
-        if (!exists) {
-          final filename = path.split(RegExp(r'[\\/]')).last;
-          final dur = widget.project.videoDurations.length > i ? widget.project.videoDurations[i] : 0.0;
-          final size = widget.project.videoSizes.length > i ? widget.project.videoSizes[i] : 0;
-          
-          final newPath = await _showManualRelinkDialog(filename, dur, size);
-          if (newPath != null) {
-            // Έλεγχος διάρκειας για ασφάλεια
-            final tempPlayer = Player();
-            await tempPlayer.open(Media(newPath), play: false);
-            await Future.delayed(const Duration(milliseconds: 500));
-            double newDur = tempPlayer.state.duration.inSeconds.toDouble();
-            await tempPlayer.dispose();
-
-            if ((newDur - dur).abs() > 2.0) { // Επιτρέπουμε απόκλιση 2 δευτερολέπτων
-               bool? confirm = await showDialog<bool>(
-                 context: context,
-                 builder: (ctx) => AlertDialog(
-                   title: const Text('Προσοχή!'),
-                   content: Text('Το βίντεο που επιλέξατε έχει διάρκεια ${newDur.toInt()}s, ενώ το αρχικό ήταν ${dur.toInt()}s. '
-                                'Αυτό μπορεί να χαλάσει τις φάσεις. Θέλετε να συνεχίσετε;'),
-                   actions: [
-                     TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('ΟΧΙ')),
-                     FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('ΝΑΙ')),
-                   ],
-                 ),
-               );
-               if (confirm != true) { i--; continue; } // Ξαναζητάμε το ίδιο αρχείο
-            }
-
-            widget.project.videoPaths[i] = newPath;
-            
-            // Ενημέρωση μεγέθους και διάρκειας για να δουλεύει το auto-relink στο μέλλον
-            if (widget.project.videoSizes.length > i) {
-               try {
-                 if (newPath.startsWith('content://')) {
-                    // Χρήση του native channel για λήψη μεγέθους από content URI
-                    const platform = MethodChannel('com.example.highlight_manager/native_picker');
-                    final int? actualSize = await platform.invokeMethod('getFileSize', {'path': newPath});
-                    if (actualSize != null) widget.project.videoSizes[i] = actualSize;
-                 } else {
-                   widget.project.videoSizes[i] = File(newPath).lengthSync();
-                 }
-               } catch (_) {}
-            }
-            if (widget.project.videoDurations.length > i) {
-               widget.project.videoDurations[i] = newDur;
-            }
-            
-            await state.saveProject(widget.project);
-          } else {
-            if (mounted) Navigator.pop(context);
-            return;
-          }
-        }
+    if (!allOk && mounted) {
+      bool relinked = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => ManualRelinkPanel(project: widget.project, state: state),
+      ) ?? false;
+      
+      if (!relinked && mounted) {
+        Navigator.pop(context);
+        return;
       }
     }
 
@@ -2699,83 +2724,6 @@ class _EditorScreenState extends State<EditorScreen> {
       _loadAnalysisData();
     }
   }
-
-  Future<String?> _showManualRelinkDialog(String filename, double duration, int size) async {
-    final state = Provider.of<AppState>(context, listen: false);
-    final mb = (size / (1024 * 1024)).toStringAsFixed(1);
-    final durStr = _formatDuration(Duration(seconds: duration.toInt()));
-
-    String cleanName = filename;
-    try {
-      cleanName = Uri.decodeComponent(filename).split(RegExp(r'[\\/]')).last;
-    } catch (_) {}
-
-    return showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        title: Text(state.t('relink_title'), style: const TextStyle(fontWeight: FontWeight.bold)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(state.t('relink_failed')),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.errorContainer.withOpacity(0.3),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Theme.of(context).colorScheme.error.withOpacity(0.5)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(cleanName, style: const TextStyle(fontWeight: FontWeight.bold)),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.copy, size: 18),
-                        constraints: const BoxConstraints(),
-                        padding: const EdgeInsets.all(4),
-                        onPressed: () {
-                          Clipboard.setData(ClipboardData(text: cleanName));
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Αντιγράφηκε!'), duration: Duration(seconds: 1)),
-                          );
-                        },
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(state.t('relink_info').replaceAll('{dur}', durStr).replaceAll('{size}', mb),
-                       style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                ],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, null), child: Text(state.t('cancel'))),
-          FilledButton(
-            onPressed: () async {
-              FilePickerResult? result = await FilePicker.platform.pickFiles(
-                type: FileType.video,
-                dialogTitle: 'Επιλέξτε το αρχείο: $filename',
-              );
-              if (result != null && result.files.single.path != null) {
-                Navigator.pop(ctx, result.files.single.path);
-              }
-            },
-            child: Text(state.t('relink_manual_btn')),
-          ),
-        ],
-      ),
-    );
-  }
-
   Future<void> _loadAnalysisData() async {
     try {
       final dir = await getApplicationDocumentsDirectory();
@@ -3678,10 +3626,10 @@ class _EditorScreenState extends State<EditorScreen> {
       mainAxisSize: MainAxisSize.min,
       children: [
         videoContainer,
-        const SizedBox(height: 16),
+        const SizedBox(height: 2),
         // Γραμμή 1: Slider
         SizedBox(
-          height: 12,
+          height: 10,
           child: ValueListenableBuilder<double>(
             valueListenable: globalPositionNotifier,
             builder: (context, currentPos, child) {
@@ -3729,10 +3677,10 @@ class _EditorScreenState extends State<EditorScreen> {
             }
           ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 2),
         // Γραμμή 2: Κουμπιά (Συμπαγή & Οβάλ Play)
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 2.0),
+          padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 0.0),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             crossAxisAlignment: CrossAxisAlignment.center,
@@ -3765,7 +3713,7 @@ class _EditorScreenState extends State<EditorScreen> {
                         onLongPressStart: (_) => _startSeeking(false),
                         onLongPressEnd: (_) => _stopSeeking(),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 6.0),
+                          padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 2.0),
                           decoration: BoxDecoration(
                             color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.4),
                             borderRadius: BorderRadius.circular(20),
@@ -3777,7 +3725,7 @@ class _EditorScreenState extends State<EditorScreen> {
                         onTap: () => player.playOrPause(),
                         borderRadius: BorderRadius.circular(16),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
                           decoration: BoxDecoration(
                             color: Theme.of(context).colorScheme.primaryContainer,
                             borderRadius: BorderRadius.circular(16),
@@ -3795,7 +3743,7 @@ class _EditorScreenState extends State<EditorScreen> {
                         onLongPressStart: (_) => _startSeeking(true),
                         onLongPressEnd: (_) => _stopSeeking(),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 6.0),
+                          padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 2.0),
                           decoration: BoxDecoration(
                             color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.4),
                             borderRadius: BorderRadius.circular(20),
@@ -3822,7 +3770,7 @@ class _EditorScreenState extends State<EditorScreen> {
             ],
           ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 2),
       ],
     );
   }
@@ -4515,17 +4463,25 @@ class _EditorScreenState extends State<EditorScreen> {
                     children: [
                       Expanded(
                         child: FilledButton(
-                          style: FilledButton.styleFrom(backgroundColor: const Color(0xFF2563EB), padding: const EdgeInsets.symmetric(vertical: 16)),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFF2563EB), 
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
                           onPressed: () => _showExportDialog(context, 'join'),
-                          child: const Text('Export Video', style: TextStyle(fontWeight: FontWeight.bold)),
+                          child: const Text('Export Video', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 4),
                       Expanded(
                         child: FilledButton(
-                          style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0D9488), padding: const EdgeInsets.symmetric(vertical: 16)),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFF0D9488), 
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
                           onPressed: () => _showExportDialog(context, 'separate'),
-                          child: const Text('Export Clips', style: TextStyle(fontWeight: FontWeight.bold)),
+                          child: const Text('Export Clips', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                         ),
                       ),
                     ],
@@ -4782,8 +4738,12 @@ class _EditorScreenState extends State<EditorScreen> {
             } else {
               return Column(
                 children: [
-                  _buildMobileVideoPlayer(context),
+                  Flexible(
+                    flex: 2,
+                    child: _buildMobileVideoPlayer(context),
+                  ),
                   Expanded(
+                    flex: 3,
                     child: _buildSidePanel(context, state),
                   ),
                 ],

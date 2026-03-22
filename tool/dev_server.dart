@@ -61,7 +61,7 @@ void launchLogViewer() {
 
   Process.run('cmd', [
     '/c', 'start', '"Flutter_Smart_Logs"', 'powershell', '-NoProfile', 
-    '-Command', '\$Host.UI.RawUI.WindowTitle = \'Flutter_Smart_Logs\'; Get-Content tool/.logs.txt -Wait -Tail 40'
+    '-Command', '\$Host.UI.RawUI.WindowTitle = \'Flutter_Smart_Logs\'; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-Content tool/.logs.txt -Wait -Tail 40'
   ]);
 }
 
