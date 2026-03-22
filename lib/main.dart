@@ -366,7 +366,6 @@ class AppState extends ChangeNotifier {
     return projDir;
   }
 
-  // Φορτώνει όλα τα JSON αρχεία κατά την εκκίνηση (και κάνει migration αν χρειάζεται)
   Future<void> loadAllProjects() async {
     isLoading = true;
     notifyListeners();
@@ -3706,17 +3705,21 @@ class _EditorScreenState extends State<EditorScreen> {
           ),
           child: Row(
             children: [
-              if (showHighlightsOnly) ...[
-                SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: Checkbox(
-                    value: _areAllHighlightsSelected(),
-                    onChanged: widget.project.phases.where((p) => p.isHighlight).isEmpty ? null : _toggleAllHighlights,
-                  ),
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: showHighlightsOnly
+                    ? SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: Checkbox(
+                          value: _areAllHighlightsSelected(),
+                          onChanged: widget.project.phases.where((p) => p.isHighlight).isEmpty ? null : _toggleAllHighlights,
+                        ),
+                      )
+                    : const SizedBox.shrink(),
                 ),
-                const SizedBox(width: 8),
-              ],
+              ),
               InkWell(
                 onTap: () {
                   bool phaseChanged = false;
@@ -3769,91 +3772,93 @@ class _EditorScreenState extends State<EditorScreen> {
                   }
                 },
                 borderRadius: BorderRadius.circular(8),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
-                    color: showHighlightsOnly ? Theme.of(context).colorScheme.primaryContainer : Colors.transparent,
-                    border: Border.all(color: showHighlightsOnly ? Theme.of(context).colorScheme.primary : Colors.grey.shade500, width: 2.0),
+                    color: showHighlightsOnly 
+                        ? Theme.of(context).colorScheme.primaryContainer.withOpacity(0.6) 
+                        : Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
                     borderRadius: BorderRadius.circular(8),
-                    boxShadow: showHighlightsOnly 
-                        ? [
-                            BoxShadow(
-                              color: Theme.of(context).brightness == Brightness.light ? Colors.black87 : Colors.white54,
-                              spreadRadius: 1.5,
-                              blurRadius: 0,
-                            )
-                          ]
-                        : null,
+                    border: Border.all(
+                      color: showHighlightsOnly 
+                          ? Theme.of(context).colorScheme.primary.withOpacity(0.6) 
+                          : Colors.grey.withOpacity(0.4),
+                      width: 1.5,
+                    ),
                   ),
                   child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.star, size: 16, color: showHighlightsOnly ? Theme.of(context).colorScheme.primary : Colors.grey),
-                      const SizedBox(width: 2),
-                      const Icon(Icons.arrow_forward_ios, size: 12, color: Colors.grey),
-                      const SizedBox(width: 2),
-                      Icon(Icons.movie_creation_outlined, size: 16, color: showHighlightsOnly ? Theme.of(context).colorScheme.primary : Colors.grey),
+                      Icon(
+                        showHighlightsOnly ? Icons.star : Icons.movie_creation_outlined,
+                        size: 20,
+                        color: showHighlightsOnly ? Colors.amber : Theme.of(context).colorScheme.primary,
+                      ),
+                      const SizedBox(width: 8),
+                      Builder(
+                        builder: (ctx) {
+                          int displayIdx = currentPlayingPhase != null ? phases.indexOf(currentPlayingPhase!) : -1;
+                          String idxStr = displayIdx >= 0 ? '${displayIdx + 1}' : '-';
+                          return RichText(
+                            text: TextSpan(
+                              style: const TextStyle(fontSize: 16),
+                              children: [
+                                TextSpan(text: '$idxStr ', style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.normal)),
+                                const TextSpan(text: '/ ', style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.normal)),
+                                TextSpan(text: '${phases.length}', style: const TextStyle(color: Colors.amber, fontWeight: FontWeight.bold)),
+                              ]
+                            )
+                          );
+                        }
+                      ),
                     ],
                   ),
                 ),
               ),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: RichText(
-                  text: TextSpan(
-                    style: const TextStyle(fontSize: 18),
-                    children: [
-                      TextSpan(text: '${activePhaseIndex >= 0 ? activePhaseIndex + 1 : 0} ', style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.normal)),
-                      const TextSpan(text: '/ ', style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
-                      TextSpan(text: '${phases.length}', style: TextStyle(color: showHighlightsOnly ? Colors.amber : const Color(0xFF900020), fontWeight: FontWeight.bold)),
-                    ]
-                  )
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: showHighlightsOnly
+                    ? IconButton(
+                        icon: const Icon(Icons.sort, size: 20),
+                        onPressed: () {
+                          setState(() {
+                            widget.project.phases.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+                          });
+                          state.saveProject(widget.project);
+                        },
+                        tooltip: 'Επαναφορά Σειράς',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      )
+                    : IconButton(
+                        icon: const Icon(Icons.cleaning_services, size: 20),
+                        onPressed: () async {
+                          bool? confirm = await showDialog<bool>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              title: const Text('Επαναφορά Φάσεων', style: TextStyle(fontWeight: FontWeight.bold)),
+                              content: const Text('Είστε σίγουροι ότι θέλετε να μηδενίσετε το ιστορικό προβολής (Seen) για όλες τις φάσεις;'),
+                              actions: [
+                                TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(state.t('no'))),
+                                FilledButton(
+                                  onPressed: () => Navigator.pop(ctx, true),
+                                  style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+                                  child: Text(state.t('yes')),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (confirm == true) _resetSeen();
+                        },
+                        tooltip: 'Reset Seen',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
                 ),
               ),
-              const Spacer(),
-              if (showHighlightsOnly)
-                IconButton(
-                  icon: const Icon(Icons.sort, size: 20),
-                  onPressed: () {
-                    setState(() {
-                      widget.project.phases.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-                    });
-                    state.saveProject(widget.project);
-                  },
-                  tooltip: 'Επαναφορά Σειράς',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                )
-              else
-                IconButton(
-                  icon: const Icon(Icons.cleaning_services, size: 20),
-                  onPressed: () async {
-                    bool? confirm = await showDialog<bool>(
-                      context: context,
-                      builder: (ctx) => AlertDialog(
-                        title: const Text('Επαναφορά Φάσεων', style: TextStyle(fontWeight: FontWeight.bold)),
-                        content: const Text('Είστε σίγουροι ότι θέλετε να μηδενίσετε το ιστορικό προβολής (Seen) για όλες τις φάσεις;'),
-                        actions: [
-                          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(state.t('no'))),
-                          FilledButton(
-                            onPressed: () => Navigator.pop(ctx, true),
-                            style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
-                            child: Text(state.t('yes')),
-                          ),
-                        ],
-                      ),
-                    );
-                    if (confirm == true) _resetSeen();
-                  },
-                  tooltip: 'Reset Seen',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                ),
             ],
           ),
         ),
