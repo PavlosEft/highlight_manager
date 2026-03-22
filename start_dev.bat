@@ -7,6 +7,10 @@ call kill_all.bat
 title Control Panel - Smart Dev Server
 
 echo.
+echo 🔌 Epanekkinisi tou ADB (gia na min xathei i sindesi)...
+adb start-server
+timeout /t 3 /nobreak > NUL
+
 echo 🚀 Starting Device Mirror...
 start cmd /c "C:\Users\Lenovo\Desktop\device-mirror\run-mirror.bat"
 

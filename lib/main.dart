@@ -210,6 +210,11 @@ const Map<String, Map<String, String>> translations = {
     'relink_progress': 'Συνδέθηκαν {count} από {total} αρχεία',
     'relink_copy_name': 'Αντιγραφή Ονόματος',
     'relink_start_editor': 'ΕΝΑΡΞΗ EDITOR',
+    'analyze_prompt_title': 'Ανάλυση Βίντεο',
+    'analyze_prompt_msg': 'Θέλετε να γίνει αυτόματη ανάλυση τώρα για να βρεθούν τα highlights;\n\n⚠️ Αν τα αρχεία βρίσκονται σε εξωτερική κάρτα SD/USB, η διαδικασία ενδέχεται να είναι αισθητά πιο αργή.\n\nΜπορείτε να παραλείψετε αυτό το βήμα και να κάνετε την ανάλυση αργότερα μέσα από τον Editor, πατώντας το ',
+    'analyze_skip': 'ΑΡΓΟΤΕΡΑ',
+    'analyze_now': 'ΑΝΑΛΥΣΗ ΤΩΡΑ',
+    'analysis_completed': 'Η ανάλυση ολοκληρώθηκε!',
   },
   'en': {
     'title': 'Highlight Manager',
@@ -267,6 +272,11 @@ const Map<String, Map<String, String>> translations = {
     'sync_done': 'Process completed successfully!',
     'sync_err': 'Error during process: ',
     'sync_no_ext': 'No external storage found.',
+    'analyze_prompt_title': 'Video Analysis',
+    'analyze_prompt_msg': 'Do you want to run automatic analysis now to find highlights?\n\n⚠️ If the files are on an external SD/USB card, this process might be significantly slower.\n\nYou can skip this step and analyze later from the Editor by tapping the ',
+    'analyze_skip': 'LATER',
+    'analyze_now': 'ANALYZE NOW',
+    'analysis_completed': 'Analysis completed!',
   }
 };
 
@@ -504,8 +514,12 @@ class AppState extends ChangeNotifier {
     if (path.startsWith('content://')) {
       try {
         const platform = MethodChannel('com.example.highlight_manager/native_picker');
-        return await platform.invokeMethod('checkFileExists', {'path': path}) ?? false;
-      } catch (_) { return false; }
+        final result = await platform.invokeMethod('checkFileExists', {'path': path});
+        return result ?? true;
+      } catch (_) { 
+        // Αν λείπει η native μέθοδος, επιστρέφουμε true για να μην μπλοκάρει όλο το app
+        return true; 
+      }
     }
     return File(path).existsSync();
   }
@@ -591,8 +605,157 @@ class AppState extends ChangeNotifier {
     throw Exception('Δεν βρέθηκε το ffmpeg.exe!');
   }
 
+  Future<bool> runAnalysisOnExistingProject(Project project, Function(String, double) onStatusUpdate) async {
+    _isAnalysisCancelled = false;
+    final dir = await _localPath;
+    final projectDir = Directory('${dir.path}/${project.id}');
+    
+    double totalDur = project.totalDuration;
+    List<double> allRms = [];
+    List<double> allTimes = [];
+    double cumulativeTime = 0.0;
+    int totalLines = 0;
+    final totalStopwatch = Stopwatch()..start();
+
+    try {
+      for (int i = 0; i < project.videoPaths.length; i++) {
+        if (_isAnalysisCancelled) throw Exception('Cancelled');
+        
+        String path = project.videoPaths[i];
+        double dur = project.videoDurations[i];
+        
+        _activeFfmpegProcesses.clear();
+        List<double> currentRms = [];
+        List<double> currentTimes = [];
+        double currentTime = 0.0;
+        
+        final afFilter = "aformat=channel_layouts=mono,aresample=11025,asetnsamples=1024,astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level";
+
+        void processRmsLine(String line) {
+          totalLines++;
+          if (line.contains('lavfi.astats.Overall.RMS_level=')) {
+            final strVal = line.split('=').last.trim();
+            double? db = strVal == '-inf' ? -100.0 : double.tryParse(strVal);
+            if (db != null) {
+              double linear = db <= -100.0 ? 0.0 : math.pow(10, db / 20.0).toDouble();
+              currentRms.add(linear);
+              currentTimes.add(currentTime + cumulativeTime);
+              currentTime += (1024.0 / 11025.0);
+              
+              if (currentRms.length % 50 == 0) {
+                double globalProgress = (cumulativeTime + currentTime) / totalDur;
+                onStatusUpdate(t('analysis_step').replaceAll('{i}', '${i + 1}').replaceAll('{total}', '${project.videoPaths.length}'), globalProgress.clamp(0.0, 0.99));
+              }
+            }
+          }
+        }
+
+        if (Platform.isWindows || Platform.isLinux) {
+          final ffmpegExe = await _getDesktopFFmpegPath();
+          final p = await Process.start(
+            ffmpegExe,
+            ['-y', '-threads', '4', '-i', path, '-vn', '-af', afFilter, '-f', 'null', '-'],
+          );
+          _activeFfmpegProcesses.add(p);
+          p.stderr.transform(utf8.decoder).transform(const LineSplitter()).listen(processRmsLine);
+          final exitCode = await p.exitCode;
+          if (exitCode != 0 && !_isAnalysisCancelled) throw Exception('FFmpeg failed');
+          if (_isAnalysisCancelled) throw Exception('Cancelled');
+        } else {
+          String ffmpegPath = path;
+          if (Platform.isAndroid && path.startsWith('content://')) {
+             try {
+               final saf = await FFmpegKitConfig.getSafParameterForRead(path);
+               if (saf != null) ffmpegPath = saf;
+             } catch (_) {}
+          }
+          final cmd = "-y -threads 4 -i \"$ffmpegPath\" -vn -af \"$afFilter\" -f null -";
+          final completer = Completer<void>();
+          FFmpegKit.executeAsync(
+            cmd,
+            (session) async {
+              final returnCode = await session.getReturnCode();
+              if (ReturnCode.isCancel(returnCode) || _isAnalysisCancelled) {
+                completer.completeError(Exception('Cancelled'));
+              } else {
+                completer.complete();
+              }
+            },
+            (log) {
+              final msg = log.getMessage();
+              if (msg != null) {
+                for (var line in msg.split('\n')) processRmsLine(line);
+              }
+            }
+          );
+          await completer.future;
+        }
+
+        List<double> smoothedRms = [];
+        for (int k = 0; k < currentRms.length; k++) {
+           double sumSq = 0.0;
+           int count = 0;
+           for (int w = 0; w < 4; w++) {
+             if (k + w < currentRms.length) {
+               double r = currentRms[k + w];
+               sumSq += (r * r);
+               count++;
+             }
+           }
+           smoothedRms.add(count > 0 ? math.sqrt(sumSq / count) : 0.0);
+        }
+        allRms.addAll(smoothedRms);
+        allTimes.addAll(currentTimes);
+        cumulativeTime += dur;
+      }
+
+      if (_isAnalysisCancelled) throw Exception('Cancelled');
+
+      onStatusUpdate(t('analysis_step').replaceAll('{i}', '${project.videoPaths.length}').replaceAll('{total}', '${project.videoPaths.length}'), 1.0);
+      
+      double sumRms = 0.0;
+      for (double r in allRms) sumRms += r;
+      double avgRms = allRms.isEmpty ? 0.0 : sumRms / allRms.length;
+      double maxRms = allRms.isNotEmpty ? allRms.reduce(math.max) : 0.0;
+
+      final analysisFile = File('${projectDir.path}/analysis.json');
+      final analysisData = {'max_rms': maxRms, 'avg_rms': avgRms, 'times': allTimes, 'rms': allRms};
+      await analysisFile.writeAsString(jsonEncode(analysisData));
+
+      double targetPhases = (totalDur / 60.0) * 2.5;
+      if (targetPhases < 1) targetPhases = 1;
+      
+      double bestSensitivity = 55.0;
+      double lowS = 1.0, highS = 99.0;
+      int bestCountDiff = 999999;
+      
+      for (int iter = 0; iter < 12; iter++) {
+        double midS = (lowS + highS) / 2;
+        double level = maxRms - (midS / 100.0) * (maxRms - avgRms);
+        int count = 0;
+        double lastT = -999.0;
+        for (int i = 0; i < allRms.length; i++) {
+          if (allRms[i] > level && allTimes[i] - lastT > 2.0) {
+            count++;
+            lastT = allTimes[i];
+          }
+        }
+        int diff = (count - targetPhases).abs().toInt();
+        if (diff < bestCountDiff) { bestCountDiff = diff; bestSensitivity = midS; }
+        if (count > targetPhases) highS = midS; else lowS = midS;
+      }
+
+      project.sensitivity = bestSensitivity;
+      await saveProject(project);
+      return true;
+    } catch (e) {
+      print('[ANALYZE] Error during post-analysis: $e');
+      return false;
+    }
+  }
+
   // Ανάλυση και δημιουργία Project με Progress Callback και Ακύρωση
-  Future<Project?> analyzeAndCreateProject(String baseName, List<String> paths, Function(String, double) onStatusUpdate) async {
+  Future<Project?> analyzeAndCreateProject(String baseName, List<String> paths, Function(String, double) onStatusUpdate, {bool skipAnalysis = false}) async {
     _isAnalysisCancelled = false;
     String finalName = baseName;
     int counter = 1;
@@ -627,7 +790,8 @@ class AppState extends ChangeNotifier {
         if (_isAnalysisCancelled) throw Exception('Cancelled');
         
         String path = paths[i];
-        onStatusUpdate(t('analysis_step').replaceAll('{i}', '${i + 1}').replaceAll('{total}', '${paths.length}'), 0.0);
+        String stepMsg = skipAnalysis ? 'Προετοιμασία ${i + 1}/${paths.length}...' : t('analysis_step').replaceAll('{i}', '${i + 1}').replaceAll('{total}', '${paths.length}');
+        onStatusUpdate(stepMsg, 0.0);
         
         double dur = 0.0;
         final tempPlayer = Player();
@@ -653,6 +817,7 @@ class AppState extends ChangeNotifier {
       stepStopwatch.reset();
 
       // 2ο Πέρασμα: Ανάλυση Ήχου
+      if (!skipAnalysis) {
       for (int i = 0; i < paths.length; i++) {
         print('[ANALYZE] Ξεκινάει FFmpeg για αρχείο ${i + 1}/${paths.length}...');
         final fileStopwatch = Stopwatch()..start();
@@ -757,36 +922,36 @@ class AppState extends ChangeNotifier {
         allTimes.addAll(currentTimes);
         cumulativeTime += dur;
       }
+      } // End of !skipAnalysis
 
       if (_isAnalysisCancelled) throw Exception('Cancelled');
 
-      print('[ANALYZE] Συνολική Ανάλυση Ήχου ολοκληρώθηκε σε ${stepStopwatch.elapsedMilliseconds}ms');
-      print('[TELEMETRY] Συνολικές γραμμές logs που επεξεργάστηκαν: $totalLines');
-      onStatusUpdate(t('analysis_step').replaceAll('{i}', '${paths.length}').replaceAll('{total}', '${paths.length}'), 1.0);
-      stepStopwatch.reset();
-      
-      double sumRms = 0.0;
-      for (double r in allRms) {
-        sumRms += r;
-      }
-      double avgRms = allRms.isEmpty ? 0.0 : sumRms / allRms.length;
-      
-      double maxRms = 0.0;
-      if (allRms.isNotEmpty) {
-        maxRms = allRms.reduce(math.max);
+      if (!skipAnalysis) {
+        print('[ANALYZE] Συνολική Ανάλυση Ήχου ολοκληρώθηκε σε ${stepStopwatch.elapsedMilliseconds}ms');
+        print('[TELEMETRY] Συνολικές γραμμές logs που επεξεργάστηκαν: $totalLines');
+        onStatusUpdate(t('analysis_step').replaceAll('{i}', '${paths.length}').replaceAll('{total}', '${paths.length}'), 1.0);
+        stepStopwatch.reset();
+        
+        double sumRms = 0.0;
+        for (double r in allRms) sumRms += r;
+        double avgRms = allRms.isEmpty ? 0.0 : sumRms / allRms.length;
+        
+        double maxRms = 0.0;
+        if (allRms.isNotEmpty) maxRms = allRms.reduce(math.max);
+
+        final analysisFile = File('${projectDir.path}/analysis.json');
+        final analysisData = {
+          'max_rms': maxRms,
+          'avg_rms': avgRms,
+          'times': allTimes,
+          'rms': allRms,
+        };
+        await analysisFile.writeAsString(jsonEncode(analysisData));
+        print('[TELEMETRY] Χρόνος εγγραφής JSON στο δίσκο: ${stepStopwatch.elapsedMilliseconds}ms');
       }
 
-      final analysisFile = File('${projectDir.path}/analysis.json');
-      final analysisData = {
-        'max_rms': maxRms,
-        'avg_rms': avgRms,
-        'times': allTimes,
-        'rms': allRms,
-      };
-      await analysisFile.writeAsString(jsonEncode(analysisData));
-      print('[TELEMETRY] Χρόνος εγγραφής JSON στο δίσκο: ${stepStopwatch.elapsedMilliseconds}ms');
-
-      onStatusUpdate(t('analysis_step').replaceAll('{i}', '${paths.length}').replaceAll('{total}', '${paths.length}'), 0.95);
+      String finalStepLabel = skipAnalysis ? 'Δημιουργία μικρογραφιών...' : t('analysis_step').replaceAll('{i}', '${paths.length}').replaceAll('{total}', '${paths.length}');
+      onStatusUpdate(finalStepLabel, 0.95);
       try {
         List<Map<String, dynamic>> extractTasks = [];
         if (paths.length >= 4) {
@@ -819,42 +984,51 @@ class AppState extends ChangeNotifier {
         print('[ANALYZE] Σφάλμα μικρογραφιών: $e');
       }
 
-      // Υπολογισμός στόχου φάσεων: 250 φάσεις ανά 100 λεπτά (ή 2.5 φάσεις / λεπτό)
-      double targetPhases = (totalDur / 60.0) * 2.5;
-      if (targetPhases < 1) targetPhases = 1;
-      
       double bestSensitivity = 55.0;
-      double lowS = 1.0;
-      double highS = 99.0;
-      int bestCountDiff = 999999;
-      
-      // Αλγόριθμος εύρεσης ιδανικής ευαισθησίας (Binary Search)
-      for (int iter = 0; iter < 12; iter++) {
-        double midS = (lowS + highS) / 2;
-        double level = maxRms - (midS / 100.0) * (maxRms - avgRms);
-        int count = 0;
-        double lastT = -999.0;
+
+      if (!skipAnalysis) {
+        double sumRms = 0.0;
+        for (double r in allRms) sumRms += r;
+        double avgRms = allRms.isEmpty ? 0.0 : sumRms / allRms.length;
+        double maxRms = allRms.isNotEmpty ? allRms.reduce(math.max) : 0.0;
+
+        // Υπολογισμός στόχου φάσεων: 250 φάσεις ανά 100 λεπτά (ή 2.5 φάσεις / λεπτό)
+        double targetPhases = (totalDur / 60.0) * 2.5;
+        if (targetPhases < 1) targetPhases = 1;
         
-        for (int i = 0; i < allRms.length; i++) {
-          if (allRms[i] > level) {
-            if (allTimes[i] - lastT > 2.0) { // Default grouping test
-              count++;
-              lastT = allTimes[i];
+        double lowS = 1.0;
+        double highS = 99.0;
+        int bestCountDiff = 999999;
+        
+        // Αλγόριθμος εύρεσης ιδανικής ευαισθησίας (Binary Search)
+        for (int iter = 0; iter < 12; iter++) {
+          double midS = (lowS + highS) / 2;
+          double level = maxRms - (midS / 100.0) * (maxRms - avgRms);
+          int count = 0;
+          double lastT = -999.0;
+          
+          for (int i = 0; i < allRms.length; i++) {
+            if (allRms[i] > level) {
+              if (allTimes[i] - lastT > 2.0) { // Default grouping test
+                count++;
+                lastT = allTimes[i];
+              }
             }
           }
+          
+          int diff = (count - targetPhases).abs().toInt();
+          if (diff < bestCountDiff) {
+            bestCountDiff = diff;
+            bestSensitivity = midS;
+          }
+          
+          if (count > targetPhases) {
+            highS = midS; 
+          } else {
+            lowS = midS;  
+          }
         }
-        
-        int diff = (count - targetPhases).abs().toInt();
-        if (diff < bestCountDiff) {
-          bestCountDiff = diff;
-          bestSensitivity = midS;
-        }
-        
-        if (count > targetPhases) {
-          highS = midS; // Έχουμε πολλές φάσεις -> ρίχνουμε το sensitivity
-        } else {
-          lowS = midS;  // Έχουμε λίγες φάσεις -> ανεβάζουμε το sensitivity
-        }
+        print('[ANALYZE] Δυναμική Ευαισθησία ρυθμίστηκε στο: ${bestSensitivity.toStringAsFixed(1)} (Στόχος φάσεων: ${targetPhases.toInt()})');
       }
 
       final newProject = Project(
@@ -868,7 +1042,6 @@ class AppState extends ChangeNotifier {
       );
 
       await saveProject(newProject);
-      print('[ANALYZE] Δυναμική Ευαισθησία ρυθμίστηκε στο: ${bestSensitivity.toStringAsFixed(1)} (Στόχος φάσεων: ${targetPhases.toInt()})');
       print('[ANALYZE] ΟΛΟΚΛΗΡΟ ΤΟ PROJECT ΔΗΜΙΟΥΡΓΗΘΗΚΕ ΣΕ: ${totalStopwatch.elapsed.inSeconds} δευτερόλεπτα.');
       return newProject;
 
@@ -1043,11 +1216,74 @@ class _HighlightManagerAppState extends State<HighlightManagerApp> {
   }
 }
 
+class ExistingAnalysisDialog extends StatefulWidget {
+  final AppState state;
+  final Project project;
+  const ExistingAnalysisDialog({super.key, required this.state, required this.project});
+
+  @override
+  State<ExistingAnalysisDialog> createState() => _ExistingAnalysisDialogState();
+}
+
+class _ExistingAnalysisDialogState extends State<ExistingAnalysisDialog> {
+  String status = "Προετοιμασία...";
+  double progress = 0.0;
+  bool isCancelled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _start();
+  }
+
+  void _start() async {
+    bool success = await widget.state.runAnalysisOnExistingProject(widget.project, (newStatus, newProgress) {
+      if (mounted) {
+        setState(() {
+          status = newStatus;
+          progress = newProgress;
+        });
+      }
+    });
+    if (mounted) {
+      Navigator.pop(context, success);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.state.t('preparation'), style: const TextStyle(fontWeight: FontWeight.bold)),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          LinearProgressIndicator(value: progress > 0 ? progress : null),
+          const SizedBox(height: 20),
+          Text(status, textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.bold)),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: isCancelled ? null : () {
+            setState(() {
+              isCancelled = true;
+              status = widget.state.t('cancelling');
+            });
+            widget.state.cancelAnalysis();
+          },
+          child: Text(isCancelled ? widget.state.t('cancelling') : widget.state.t('cancel_analysis'), style: const TextStyle(color: Colors.red)),
+        ),
+      ],
+    );
+  }
+}
+
 class ProcessingDialog extends StatefulWidget {
   final AppState state;
   final String baseName;
   final List<String> paths;
-  const ProcessingDialog({super.key, required this.state, required this.baseName, required this.paths});
+  final bool skipAnalysis;
+  const ProcessingDialog({super.key, required this.state, required this.baseName, required this.paths, this.skipAnalysis = false});
 
   @override
   State<ProcessingDialog> createState() => _ProcessingDialogState();
@@ -1110,7 +1346,8 @@ class _ProcessingDialogState extends State<ProcessingDialog> {
             progress = newProgress;
           });
         }
-      }
+      },
+      skipAnalysis: widget.skipAnalysis
     );
     if (mounted) {
       Navigator.pop(context, project);
@@ -1300,6 +1537,36 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
       if (proceed != true) return;
     }
 
+    bool? doAnalysis = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: Text(state.t('analyze_prompt_title'), style: const TextStyle(fontWeight: FontWeight.bold)),
+        content: RichText(
+          text: TextSpan(
+            style: Theme.of(ctx).textTheme.bodyMedium,
+            children: [
+              TextSpan(text: state.t('analyze_prompt_msg')),
+              const WidgetSpan(
+                alignment: PlaceholderAlignment.middle,
+                child: Icon(Icons.auto_fix_high, color: Color(0xFF4A148C), size: 20),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(state.t('analyze_skip'))),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF4A148C)),
+            child: Text(state.t('analyze_now')),
+          ),
+        ],
+      ),
+    );
+
+    if (doAnalysis == null) return;
+
     Project? resultProject = await showDialog<Project?>(
       context: context,
       barrierDismissible: false,
@@ -1307,6 +1574,7 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
         state: state,
         baseName: name,
         paths: _selectedPaths,
+        skipAnalysis: !doAnalysis,
       ),
     );
 
@@ -1415,17 +1683,47 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: ListTile(
-                          visualDensity: VisualDensity.compact,
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 0.0),
-                          dense: true,
-                          leading: CircleAvatar(
-                            radius: 12,
-                            backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-                            child: Text('${index + 1}', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onPrimaryContainer, fontWeight: FontWeight.bold)),
+                          visualDensity: VisualDensity.standard,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 6.0),
+                          dense: false,
+                          leading: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.drag_indicator, color: Colors.grey, size: 20),
+                              const SizedBox(width: 4),
+                              CircleAvatar(
+                                radius: 12,
+                                backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                                child: Text('${index + 1}', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onPrimaryContainer, fontWeight: FontWeight.bold)),
+                              ),
+                            ],
                           ),
-                          title: Text(fileName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13)),
+                          title: Padding(
+                            padding: const EdgeInsets.only(bottom: 4.0),
+                            child: Text(fileName, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                          ),
+                          subtitle: FutureBuilder<int?>(
+                            future: path.startsWith('content://') 
+                                ? platform.invokeMethod('getFileSize', {'path': path}).then((v) => v as int?).catchError((_) => null)
+                                : Future.value(File(path).existsSync() ? File(path).lengthSync() : null),
+                            builder: (context, snapshot) {
+                              String sizeStr = '';
+                              if (snapshot.hasData && snapshot.data! > 0) {
+                                sizeStr = '${(snapshot.data! / (1024 * 1024)).toStringAsFixed(1)} MB';
+                              }
+                              String dateStr = '';
+                              if (!path.startsWith('content://')) {
+                                try {
+                                  final stat = File(path).statSync();
+                                  dateStr = '${stat.modified.day.toString().padLeft(2, '0')}/${stat.modified.month.toString().padLeft(2, '0')}/${stat.modified.year}  •  ';
+                                } catch (_) {}
+                              }
+                              if (sizeStr.isEmpty && dateStr.isEmpty) return const SizedBox.shrink();
+                              return Text('$dateStr$sizeStr', style: const TextStyle(fontSize: 11, color: Colors.grey));
+                            }
+                          ),
                           trailing: IconButton(
-                            icon: Icon(Icons.delete_outline, size: 18, color: Theme.of(context).colorScheme.error),
+                            icon: Icon(Icons.delete_outline, size: 22, color: Theme.of(context).colorScheme.error),
                             padding: EdgeInsets.zero,
                             constraints: const BoxConstraints(),
                             onPressed: () {
@@ -4225,43 +4523,69 @@ class _EditorScreenState extends State<EditorScreen> {
               Expanded(
                 child: Align(
                   alignment: Alignment.centerRight,
-                  child: showHighlightsOnly
-                    ? IconButton(
-                        icon: const Icon(Icons.sort, size: 20),
-                        onPressed: () {
-                          setState(() {
-                            widget.project.phases.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-                          });
-                          state.saveProject(widget.project);
-                        },
-                        tooltip: 'Επαναφορά Σειράς',
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                      )
-                    : IconButton(
-                        icon: const Icon(Icons.cleaning_services, size: 20),
-                        onPressed: () async {
-                          bool? confirm = await showDialog<bool>(
-                            context: context,
-                            builder: (ctx) => AlertDialog(
-                              title: const Text('Επαναφορά Φάσεων', style: TextStyle(fontWeight: FontWeight.bold)),
-                              content: const Text('Είστε σίγουροι ότι θέλετε να μηδενίσετε το ιστορικό προβολής (Seen) για όλες τις φάσεις;'),
-                              actions: [
-                                TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(state.t('no'))),
-                                FilledButton(
-                                  onPressed: () => Navigator.pop(ctx, true),
-                                  style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
-                                  child: Text(state.t('yes')),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (rmsData.isEmpty && !isLoadingAnalysis)
+                        IconButton(
+                          icon: const Icon(Icons.auto_fix_high, size: 24, color: Color(0xFF4A148C)),
+                          onPressed: () async {
+                            final state = Provider.of<AppState>(context, listen: false);
+                            bool? success = await showDialog<bool>(
+                              context: context,
+                              barrierDismissible: false,
+                              builder: (ctx) => ExistingAnalysisDialog(state: state, project: widget.project),
+                            );
+                            if (success == true && mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(state.t('analysis_completed'))));
+                              setState(() { isLoadingAnalysis = true; });
+                              await _loadAnalysisData();
+                              _recalcPhases();
+                            }
+                          },
+                          tooltip: state.t('analyze_now'),
+                          padding: const EdgeInsets.only(right: 8.0),
+                          constraints: const BoxConstraints(),
+                        ),
+                      showHighlightsOnly
+                        ? IconButton(
+                            icon: const Icon(Icons.sort, size: 20),
+                            onPressed: () {
+                              setState(() {
+                                widget.project.phases.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+                              });
+                              state.saveProject(widget.project);
+                            },
+                            tooltip: 'Επαναφορά Σειράς',
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                          )
+                        : IconButton(
+                            icon: const Icon(Icons.cleaning_services, size: 20),
+                            onPressed: () async {
+                              bool? confirm = await showDialog<bool>(
+                                context: context,
+                                builder: (ctx) => AlertDialog(
+                                  title: const Text('Επαναφορά Φάσεων', style: TextStyle(fontWeight: FontWeight.bold)),
+                                  content: const Text('Είστε σίγουροι ότι θέλετε να μηδενίσετε το ιστορικό προβολής (Seen) για όλες τις φάσεις;'),
+                                  actions: [
+                                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(state.t('no'))),
+                                    FilledButton(
+                                      onPressed: () => Navigator.pop(ctx, true),
+                                      style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+                                      child: Text(state.t('yes')),
+                                    ),
+                                  ],
                                 ),
-                              ],
-                            ),
-                          );
-                          if (confirm == true) _resetSeen();
-                        },
-                        tooltip: 'Reset Seen',
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                      ),
+                              );
+                              if (confirm == true) _resetSeen();
+                            },
+                            tooltip: 'Reset Seen',
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                          ),
+                    ],
+                  ),
                 ),
               ),
             ],
