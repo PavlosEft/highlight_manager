@@ -3880,7 +3880,11 @@ class _EditorScreenState extends State<EditorScreen> {
                           const SizedBox(width: 4),
                           Text(
                             '$previewCount',
-                            style: const TextStyle(color: Color(0xFF900020), fontWeight: FontWeight.bold, fontSize: 16),
+                            style: const TextStyle(
+                              color: Color(0xFF900020), 
+                              fontWeight: FontWeight.w900, 
+                              fontSize: 21,
+                            ),
                           ),
                         ],
                       ),
@@ -3988,7 +3992,10 @@ class _EditorScreenState extends State<EditorScreen> {
                 width: double.infinity,
                 child: FilledButton(
                   onPressed: () => Navigator.pop(context),
-                  child: const Text('OK'),
+                  child: const Text(
+                    'OK', 
+                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+                  ),
                 ),
               ),
             ],
@@ -4197,8 +4204,15 @@ class _EditorScreenState extends State<EditorScreen> {
                               style: const TextStyle(fontSize: 16),
                               children: [
                                 TextSpan(text: '$idxStr ', style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.normal)),
-                                const TextSpan(text: '/ ', style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.normal)),
-                                TextSpan(text: '${phases.length}', style: const TextStyle(color: Colors.amber, fontWeight: FontWeight.bold)),
+                                const TextSpan(text: '/ ', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.normal)),
+                                TextSpan(
+                                  text: '${phases.length}', 
+                                  style: TextStyle(
+                                    color: showHighlightsOnly ? Colors.amber : const Color(0xFF900020), 
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: 19,
+                                  ),
+                                ),
                               ]
                             )
                           );

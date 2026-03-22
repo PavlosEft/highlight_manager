@@ -1,13 +1,7 @@
 
 
-KIN TODO ->
-να βρω τρόπο να αλλάζω τα path τον αρχείων και να πάρω αυτά που είναι στην κάρτα μνήμης
 
-zip δεν mου παίρνει το αρχείο dev servers 
-https://gemini.google.com/app/f8767b1d83ad1766
 
-flow & Actions
-https://gemini.google.com/app/76bacda14f13ecdb
 
 omadopoihsh apanalamvanomenes faseis
 https://gemini.google.com/app/4f6e73f6e05fbe1f
