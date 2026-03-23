@@ -394,6 +394,13 @@ class AppState extends ChangeNotifier {
       isDarkMode = prefs.getBool('isDarkMode') ?? true;
       final directory = await getApplicationDocumentsDirectory();
       appDirPath = '${directory.path}/HighlightManager';
+      
+      try {
+        final tempDir = await getTemporaryDirectory();
+        final thumbDir = Directory('${tempDir.path}/hm_temp_thumbs');
+        if (await thumbDir.exists()) await thumbDir.delete(recursive: true);
+      } catch (_) {}
+      
     } catch (_) {}
     await loadAllProjects();
   }
@@ -1510,7 +1517,7 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
     
     List<String> baseNames = _selectedPaths.map((path) {
       String fileName = _pathNames[path] ?? path.split(RegExp(r'[\\/]')).last;
-      return fileName.replaceAll(RegExp(r'\.[^.]*$'), ''); // Αφαίρεση κατάληξης (π.χ. .mp4)
+      return fileName.replaceAll(RegExp(r'\.[^.]*$'), ''); 
     }).toList();
 
     _nameController.text = baseNames.join(' + ');
@@ -1547,9 +1554,9 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
             style: Theme.of(ctx).textTheme.bodyMedium,
             children: [
               TextSpan(text: state.t('analyze_prompt_msg')),
-              const WidgetSpan(
+              WidgetSpan(
                 alignment: PlaceholderAlignment.middle,
-                child: Icon(Icons.auto_fix_high, color: Color(0xFF4A148C), size: 20),
+                child: Icon(Icons.auto_fix_high, color: Theme.of(ctx).colorScheme.primary, size: 20),
               ),
             ],
           ),
@@ -1558,7 +1565,7 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(state.t('analyze_skip'))),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF4A148C)),
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(ctx).colorScheme.primary),
             child: Text(state.t('analyze_now')),
           ),
         ],
@@ -1567,23 +1574,49 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
 
     if (doAnalysis == null) return;
 
-    Project? resultProject = await showDialog<Project?>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => ProcessingDialog(
-        state: state,
-        baseName: name,
-        paths: _selectedPaths,
-        skipAnalysis: !doAnalysis,
-      ),
-    );
+    Project? resultProject;
+
+    if (doAnalysis) {
+      resultProject = await showDialog<Project?>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => ProcessingDialog(
+          state: state,
+          baseName: name,
+          paths: _selectedPaths,
+          skipAnalysis: false,
+        ),
+      );
+    } else {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => const Center(
+          child: Card(
+            child: Padding(
+              padding: EdgeInsets.all(24.0),
+              child: CircularProgressIndicator(),
+            ),
+          ),
+        ),
+      );
+      
+      resultProject = await state.analyzeAndCreateProject(
+        name,
+        _selectedPaths,
+        (s, p) {},
+        skipAnalysis: true,
+      );
+      
+      if (mounted) Navigator.pop(context); 
+    }
 
     if (mounted && resultProject != null) {
       Navigator.pop(context);
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (context) => EditorScreen(project: resultProject),
+          builder: (context) => EditorScreen(project: resultProject!),
         ),
       );
     }
@@ -1635,12 +1668,29 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
                 if (_selectedPaths.isNotEmpty) ...[
                   const SizedBox(width: 8),
                   IconButton.filledTonal(
-                    onPressed: () {
-                      setState(() {
-                        _selectedPaths.clear();
-                        _userEditedName = false;
-                        _nameController.clear();
-                      });
+                    onPressed: () async {
+                      bool? confirm = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('Καθαρισμός Λίστας', style: TextStyle(fontWeight: FontWeight.bold)),
+                          content: const Text('Είστε σίγουροι ότι θέλετε να αφαιρέσετε όλα τα βίντεο από τη λίστα;'),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('ΑΚΥΡΩΣΗ')),
+                            FilledButton(
+                              onPressed: () => Navigator.pop(ctx, true),
+                              style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+                              child: const Text('ΑΦΑΙΡΕΣΗ ΟΛΩΝ'),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (confirm == true) {
+                        setState(() {
+                          _selectedPaths.clear();
+                          _userEditedName = false;
+                          _nameController.clear();
+                        });
+                      }
                     },
                     icon: const Icon(Icons.delete_outline, color: Colors.red),
                     tooltip: t('clear_all'),
@@ -1675,65 +1725,15 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
                     return ReorderableDelayedDragStartListener(
                       key: ValueKey(path),
                       index: index,
-                      child: Card(
-                        margin: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 2.0),
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: ListTile(
-                          visualDensity: VisualDensity.standard,
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 6.0),
-                          dense: false,
-                          leading: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.drag_indicator, color: Colors.grey, size: 20),
-                              const SizedBox(width: 4),
-                              CircleAvatar(
-                                radius: 12,
-                                backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-                                child: Text('${index + 1}', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onPrimaryContainer, fontWeight: FontWeight.bold)),
-                              ),
-                            ],
-                          ),
-                          title: Padding(
-                            padding: const EdgeInsets.only(bottom: 4.0),
-                            child: Text(fileName, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-                          ),
-                          subtitle: FutureBuilder<int?>(
-                            future: path.startsWith('content://') 
-                                ? platform.invokeMethod('getFileSize', {'path': path}).then((v) => v as int?).catchError((_) => null)
-                                : Future.value(File(path).existsSync() ? File(path).lengthSync() : null),
-                            builder: (context, snapshot) {
-                              String sizeStr = '';
-                              if (snapshot.hasData && snapshot.data! > 0) {
-                                sizeStr = '${(snapshot.data! / (1024 * 1024)).toStringAsFixed(1)} MB';
-                              }
-                              String dateStr = '';
-                              if (!path.startsWith('content://')) {
-                                try {
-                                  final stat = File(path).statSync();
-                                  dateStr = '${stat.modified.day.toString().padLeft(2, '0')}/${stat.modified.month.toString().padLeft(2, '0')}/${stat.modified.year}  •  ';
-                                } catch (_) {}
-                              }
-                              if (sizeStr.isEmpty && dateStr.isEmpty) return const SizedBox.shrink();
-                              return Text('$dateStr$sizeStr', style: const TextStyle(fontSize: 11, color: Colors.grey));
-                            }
-                          ),
-                          trailing: IconButton(
-                            icon: Icon(Icons.delete_outline, size: 22, color: Theme.of(context).colorScheme.error),
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                            onPressed: () {
-                              setState(() {
-                                _selectedPaths.removeAt(index);
-                                if (!_userEditedName) _updateAutoName();
-                              });
-                            },
-                          ),
-                        ),
+                      child: NewProjectVideoItem(
+                        path: path,
+                        fileName: fileName,
+                        onRemove: () {
+                          setState(() {
+                            _selectedPaths.removeAt(index);
+                            if (!_userEditedName) _updateAutoName();
+                          });
+                        },
                       ),
                     );
                   },
@@ -1755,6 +1755,418 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
           child: Text(t('create_btn')),
         ),
       ],
+    );
+  }
+}
+
+class NewProjectVideoItem extends StatefulWidget {
+  final String path;
+  final String fileName;
+  final VoidCallback onRemove;
+
+  const NewProjectVideoItem({
+    super.key,
+    required this.path,
+    required this.fileName,
+    required this.onRemove,
+  });
+
+  @override
+  State<NewProjectVideoItem> createState() => _NewProjectVideoItemState();
+}
+
+class _NewProjectVideoItemState extends State<NewProjectVideoItem> {
+  bool _isExpanded = false;
+  Player? _player;
+  VideoController? _controller;
+  Map<String, dynamic>? _metadata;
+  List<String> _thumbPaths = [];
+  bool _isGeneratingThumbs = false;
+
+  // Gesture State
+  Timer? _seekTimer;
+  bool _isSeekingActive = false;
+  bool _isForwardSeek = true;
+  bool _showJumpIndicator = false;
+  String _jumpText = "";
+  Timer? _jumpTimer;
+
+  static const platform = MethodChannel('com.example.highlight_manager/native_picker');
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  Future<String> _getDesktopFFmpegPath() async {
+    final devFile = File('assets/bin/ffmpeg.exe');
+    if (devFile.existsSync()) return devFile.absolute.path;
+    final exeDir = File(Platform.resolvedExecutable).parent.path;
+    final releaseFile = File('$exeDir/ffmpeg.exe');
+    if (releaseFile.existsSync()) return releaseFile.absolute.path;
+    throw Exception('Δεν βρέθηκε το ffmpeg.exe!');
+  }
+
+  Future<void> _loadData() async {
+    int? size;
+    DateTime? date;
+    Duration? duration;
+    
+    // 1. Φόρτωση βασικών στοιχείων (Size/Date) ακαριαία
+    try {
+      if (widget.path.startsWith('content://')) {
+        size = await platform.invokeMethod('getFileSize', {'path': widget.path});
+        date = DateTime.now();
+      } else {
+        final file = File(widget.path);
+        if (file.existsSync()) {
+          size = file.lengthSync();
+          date = file.statSync().modified;
+        }
+      }
+    } catch (_) {}
+
+    // Εμφάνιση των διαθέσιμων στοιχείων αμέσως
+    if (mounted) {
+      setState(() {
+        _metadata = {'size': size, 'date': date, 'duration': null};
+      });
+    }
+
+    // 2. Ανάκτηση διάρκειας στο παρασκήνιο (μπορεί να πάρει χρόνο)
+    try {
+      final tempPlayer = Player();
+      await tempPlayer.open(Media(widget.path), play: false);
+      for (int j = 0; j < 30; j++) {
+        if (tempPlayer.state.duration != Duration.zero) {
+          duration = tempPlayer.state.duration;
+          break;
+        }
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+      await tempPlayer.dispose();
+    } catch (_) {}
+
+    if (mounted && duration != null) {
+      setState(() {
+        _metadata = {'size': size, 'date': date, 'duration': duration};
+      });
+    }
+    _generateThumbs(duration);
+  }
+
+  Future<void> _generateThumbs(Duration? duration) async {
+    if (_isGeneratingThumbs) return;
+    _isGeneratingThumbs = true;
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final thumbDir = Directory('${tempDir.path}/hm_temp_thumbs');
+      if (!await thumbDir.exists()) await thumbDir.create(recursive: true);
+
+      final prefix = widget.path.hashCode.abs().toString();
+      List<String> paths = [];
+      bool allExist = true;
+      for (int i = 0; i < 4; i++) {
+        final p = '${thumbDir.path}/${prefix}_$i.jpg';
+        paths.add(p);
+        if (!File(p).existsSync()) allExist = false;
+      }
+
+      if (allExist) {
+        if (mounted) setState(() => _thumbPaths = paths);
+        return;
+      }
+
+      double totalSecs = (duration != null && duration.inSeconds > 0) ? duration.inSeconds.toDouble() : 10.0;
+      List<double> times = [];
+      for (int i = 0; i < 4; i++) times.add(totalSecs * (0.1 + (i * 0.2)));
+
+      for (int i = 0; i < 4; i++) {
+        String outPath = paths[i];
+        double time = times[i];
+
+        if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+          final ffmpegExe = await _getDesktopFFmpegPath();
+          await Process.run(ffmpegExe, ['-y', '-ss', time.toStringAsFixed(2), '-i', widget.path, '-vframes', '1', '-vf', 'scale=160:-1', outPath]);
+        } else {
+          String safeInPath = widget.path;
+          if (Platform.isAndroid && widget.path.startsWith('content://')) {
+             try {
+               final saf = await FFmpegKitConfig.getSafParameterForRead(widget.path);
+               if (saf != null) safeInPath = saf;
+             } catch (_) {}
+          }
+          await FFmpegKit.execute("-y -ss ${time.toStringAsFixed(2)} -i \"$safeInPath\" -vframes 1 -vf scale=160:-1 \"$outPath\"");
+        }
+      }
+      if (mounted) setState(() => _thumbPaths = paths);
+    } catch (e) {
+      debugPrint('Error thumbs: $e');
+    } finally {
+      _isGeneratingThumbs = false;
+    }
+  }
+
+  void _toggleExpand() {
+    setState(() {
+      _isExpanded = !_isExpanded;
+      if (_isExpanded) {
+        _player = Player();
+        _controller = VideoController(_player!);
+        _player!.open(Media(widget.path), play: true); // Auto-play enabled
+      } else {
+        _player?.dispose();
+        _player = null;
+        _controller = null;
+      }
+    });
+  }
+
+  void _startSeeking(bool forward) {
+    setState(() { _isSeekingActive = true; _isForwardSeek = forward; });
+    _seekTimer?.cancel();
+    _seekTimer = Timer.periodic(const Duration(milliseconds: 200), (timer) {
+      if (_player == null) return;
+      final currentPos = _player!.state.position;
+      final newPos = forward ? currentPos + const Duration(seconds: 2) : currentPos - const Duration(seconds: 2);
+      _player!.seek(newPos);
+    });
+  }
+
+  void _stopSeeking() {
+    if (mounted) {
+      setState(() => _isSeekingActive = false);
+    }
+    _seekTimer?.cancel();
+  }
+
+  void _showJumpFeedback(bool forward) {
+    setState(() {
+      _showJumpIndicator = true;
+      _jumpText = forward ? "+5s" : "-5s";
+      _isForwardSeek = forward;
+    });
+    _jumpTimer?.cancel();
+    _jumpTimer = Timer(const Duration(milliseconds: 600), () {
+      if (mounted) setState(() => _showJumpIndicator = false);
+    });
+  }
+
+  @override
+  void dispose() {
+    _seekTimer?.cancel();
+    _jumpTimer?.cancel();
+    _player?.dispose();
+    super.dispose();
+  }
+
+  List<Widget> _buildMetaChips() {
+    final size = _metadata?['size'] as int?;
+    final date = _metadata?['date'] as DateTime?;
+    final duration = _metadata?['duration'] as Duration?;
+    
+    List<String> info = [];
+    if (date != null) info.add('📅 ${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}');
+    if (duration != null && duration != Duration.zero) {
+      String durStr = duration.inHours > 0 
+        ? '${duration.inHours}:${(duration.inMinutes % 60).toString().padLeft(2, '0')}:${(duration.inSeconds % 60).toString().padLeft(2, '0')}'
+        : '${duration.inMinutes.toString().padLeft(2, '0')}:${(duration.inSeconds % 60).toString().padLeft(2, '0')}';
+      info.add('⏱️ $durStr');
+    }
+    if (size != null && size > 0) info.add('💾 ${(size / (1024 * 1024)).toStringAsFixed(1)} MB');
+    
+    if (info.isEmpty) return [];
+    return [
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 2.0),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text(info.join('  •  '), style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.bold)),
+      )
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TapRegion(
+      onTapOutside: (_) { if (_isExpanded) _toggleExpand(); },
+      child: Card(
+        margin: const EdgeInsets.symmetric(vertical: 2.0, horizontal: 2.0),
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: InkWell(
+          onTap: _toggleExpand,
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.all(4.0),
+            child: Column(
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 100,
+                      height: 64,
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: _thumbPaths.length == 4 
+                            ? Column(
+                                children: [
+                                  Expanded(
+                                    child: Row(
+                                      children: [
+                                        Expanded(child: Image.file(File(_thumbPaths[0]), fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(color: Colors.black12))),
+                                        const SizedBox(width: 2),
+                                        Expanded(child: Image.file(File(_thumbPaths[1]), fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(color: Colors.black12))),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 2),
+                                  Expanded(
+                                    child: Row(
+                                      children: [
+                                        Expanded(child: Image.file(File(_thumbPaths[2]), fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(color: Colors.black12))),
+                                        const SizedBox(width: 2),
+                                        Expanded(child: Image.file(File(_thumbPaths[3]), fit: BoxFit.cover, errorBuilder: (_,__,___) => Container(color: Colors.black12))),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              )
+                            : const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.fileName,
+                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 4),
+                          if (_metadata == null)
+                            const Text('Φόρτωση...', style: TextStyle(fontSize: 11, color: Colors.grey))
+                          else
+                            Wrap(spacing: 8, runSpacing: 4, children: _buildMetaChips()),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: Icon(_isExpanded ? Icons.keyboard_arrow_up : Icons.close, size: 22, color: _isExpanded ? Colors.grey : Theme.of(context).colorScheme.error),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      onPressed: () async {
+                        if (_isExpanded) {
+                          _toggleExpand();
+                        } else {
+                          bool? confirm = await showDialog<bool>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              title: const Text('Αφαίρεση Βίντεο', style: TextStyle(fontWeight: FontWeight.bold)),
+                              content: const Text('Είστε σίγουροι ότι θέλετε να αφαιρέσετε αυτό το βίντεο από τη λίστα;'),
+                              actions: [
+                                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('ΑΚΥΡΩΣΗ')),
+                                FilledButton(
+                                  onPressed: () => Navigator.pop(ctx, true),
+                                  style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+                                  child: const Text('ΑΦΑΙΡΕΣΗ'),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (confirm == true) widget.onRemove();
+                        }
+                      },
+                    )
+                  ],
+                ),
+                if (_isExpanded && _controller != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6.0),
+                    child: Column(
+                      children: [
+                        AspectRatio(
+                          aspectRatio: 16 / 9,
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(6),
+                            child: Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                GestureDetector(
+                                  behavior: HitTestBehavior.opaque,
+                                  onTap: () => _player?.playOrPause(),
+                                  onDoubleTapDown: (details) {
+                                    final width = MediaQuery.of(context).size.width;
+                                    final x = details.localPosition.dx;
+                                    if (x < width * 0.4) {
+                                      _player?.seek(_player!.state.position - const Duration(seconds: 5));
+                                      _showJumpFeedback(false);
+                                    } else if (x > width * 0.6) {
+                                      _player?.seek(_player!.state.position + const Duration(seconds: 5));
+                                      _showJumpFeedback(true);
+                                    }
+                                  },
+                                  onLongPressStart: (details) {
+                                    final width = MediaQuery.of(context).size.width;
+                                    _startSeeking(details.localPosition.dx > width * 0.5);
+                                  },
+                                  onLongPressEnd: (_) => _stopSeeking(),
+                                  child: Video(controller: _controller!, controls: NoVideoControls),
+                                ),
+                                if (_showJumpIndicator || _isSeekingActive)
+                                  Center(
+                                    child: Container(
+                                      padding: const EdgeInsets.all(12),
+                                      decoration: BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
+                                      child: Icon(_isForwardSeek ? Icons.fast_forward : Icons.fast_rewind, color: Colors.white, size: 32),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        StreamBuilder<Duration>(
+                          stream: _player!.stream.position,
+                          builder: (context, snapshot) {
+                            final pos = snapshot.data ?? Duration.zero;
+                            final total = _player!.state.duration;
+                            return SliderTheme(
+                              data: SliderTheme.of(context).copyWith(
+                                trackHeight: 3,
+                                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                                overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                              ),
+                              child: Slider(
+                                value: pos.inMilliseconds.toDouble().clamp(0, total.inMilliseconds.toDouble()),
+                                max: total.inMilliseconds.toDouble(),
+                                onChanged: (v) => _player!.seek(Duration(milliseconds: v.toInt())),
+                              ),
+                            );
+                          }
+                        ),
+                      ],
+                    ),
+                  )
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -4404,16 +4816,76 @@ class _EditorScreenState extends State<EditorScreen> {
               Expanded(
                 child: Align(
                   alignment: Alignment.centerLeft,
-                  child: showHighlightsOnly
-                    ? SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: Checkbox(
-                          value: _areAllHighlightsSelected(),
-                          onChanged: widget.project.phases.where((p) => p.isHighlight).isEmpty ? null : _toggleAllHighlights,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (showHighlightsOnly) ...[
+                        Padding(
+                          padding: const EdgeInsets.only(right: 2.0),
+                          child: IconButton(
+                            icon: const Icon(Icons.sort, size: 20),
+                            onPressed: () {
+                              setState(() {
+                                widget.project.phases.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+                              });
+                              state.saveProject(widget.project);
+                            },
+                            tooltip: 'Επαναφορά Σειράς',
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                          ),
                         ),
-                      )
-                    : const SizedBox.shrink(),
+                        Padding(
+                          padding: const EdgeInsets.only(right: 4.0),
+                          child: SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: Checkbox(
+                              visualDensity: VisualDensity.compact,
+                              value: _areAllHighlightsSelected(),
+                              onChanged: widget.project.phases.where((p) => p.isHighlight).isEmpty ? null : _toggleAllHighlights,
+                            ),
+                          ),
+                        ),
+                      ] else ...[
+                        IconButton(
+                          icon: const Icon(Icons.cleaning_services, size: 20),
+                          onPressed: () async {
+                            bool? confirm = await showDialog<bool>(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                title: const Text('Επαναφορά Φάσεων', style: TextStyle(fontWeight: FontWeight.bold)),
+                                content: RichText(
+                                  text: TextSpan(
+                                    style: Theme.of(ctx).textTheme.bodyMedium,
+                                    children: [
+                                      const TextSpan(text: 'Θέλετε να επαναφέρετε όλες τις φάσεις που έχουν ήδη παίξει;\n\nΗ εφαρμογή τις μαρκάρει (με διακριτή γραμμή) όταν τις βλέπετε, ώστε να μπορεί να τις προσπερνάει αυτόματα όταν έχετε ενεργό το φίλτρο \'Skip Seen\' στις ρυθμίσεις. Με την επαναφορά, θα εμφανίζονται όλες σαν να μην τις έχετε δει ακόμα και δεν θα παραλείπονται πλέον από το φίλτρο. '),
+                                      WidgetSpan(
+                                        alignment: PlaceholderAlignment.middle,
+                                        child: Icon(Icons.settings, color: Theme.of(context).colorScheme.primary.withOpacity(0.6), size: 18),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                actions: [
+                                  TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(state.t('cancel'))),
+                                  FilledButton(
+                                    onPressed: () => Navigator.pop(ctx, true),
+                                    style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+                                    child: const Text('ΕΠΑΝΑΦΟΡΑ'),
+                                  ),
+                                ],
+                              ),
+                            );
+                            if (confirm == true) _resetSeen();
+                          },
+                          tooltip: 'Reset Seen',
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               ),
               InkWell(
@@ -4527,63 +4999,66 @@ class _EditorScreenState extends State<EditorScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       if (rmsData.isEmpty && !isLoadingAnalysis)
-                        IconButton(
-                          icon: const Icon(Icons.auto_fix_high, size: 24, color: Color(0xFF4A148C)),
-                          onPressed: () async {
-                            final state = Provider.of<AppState>(context, listen: false);
-                            bool? success = await showDialog<bool>(
-                              context: context,
-                              barrierDismissible: false,
-                              builder: (ctx) => ExistingAnalysisDialog(state: state, project: widget.project),
-                            );
-                            if (success == true && mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(state.t('analysis_completed'))));
-                              setState(() { isLoadingAnalysis = true; });
-                              await _loadAnalysisData();
-                              _recalcPhases();
-                            }
-                          },
-                          tooltip: state.t('analyze_now'),
-                          padding: const EdgeInsets.only(right: 8.0),
-                          constraints: const BoxConstraints(),
-                        ),
-                      showHighlightsOnly
-                        ? IconButton(
-                            icon: const Icon(Icons.sort, size: 20),
-                            onPressed: () {
-                              setState(() {
-                                widget.project.phases.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-                              });
-                              state.saveProject(widget.project);
-                            },
-                            tooltip: 'Επαναφορά Σειράς',
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                          )
-                        : IconButton(
-                            icon: const Icon(Icons.cleaning_services, size: 20),
+                        Padding(
+                          padding: const EdgeInsets.only(right: 4.0),
+                          child: FilledButton(
+                            style: FilledButton.styleFrom(
+                              backgroundColor: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.5),
+                              foregroundColor: Theme.of(context).colorScheme.primary,
+                              side: BorderSide(color: Theme.of(context).colorScheme.primary.withOpacity(0.5), width: 1.5),
+                              padding: const EdgeInsets.all(8.0),
+                              minimumSize: const Size(0, 0),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            ),
                             onPressed: () async {
-                              bool? confirm = await showDialog<bool>(
+                              final state = Provider.of<AppState>(context, listen: false);
+                              
+                              bool? doAnalysis = await showDialog<bool>(
                                 context: context,
+                                barrierDismissible: false,
                                 builder: (ctx) => AlertDialog(
-                                  title: const Text('Επαναφορά Φάσεων', style: TextStyle(fontWeight: FontWeight.bold)),
-                                  content: const Text('Είστε σίγουροι ότι θέλετε να μηδενίσετε το ιστορικό προβολής (Seen) για όλες τις φάσεις;'),
+                                  title: Text(state.t('analyze_prompt_title'), style: const TextStyle(fontWeight: FontWeight.bold)),
+                                  content: RichText(
+                                    text: TextSpan(
+                                      style: Theme.of(ctx).textTheme.bodyMedium,
+                                      children: [
+                                        TextSpan(text: state.t('analyze_prompt_msg')),
+                                        WidgetSpan(
+                                          alignment: PlaceholderAlignment.middle,
+                                          child: Icon(Icons.auto_fix_high, color: Theme.of(ctx).colorScheme.primary, size: 20),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
                                   actions: [
-                                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(state.t('no'))),
+                                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(state.t('cancel'))),
                                     FilledButton(
                                       onPressed: () => Navigator.pop(ctx, true),
-                                      style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
-                                      child: Text(state.t('yes')),
+                                      style: FilledButton.styleFrom(backgroundColor: Theme.of(ctx).colorScheme.primary),
+                                      child: Text(state.t('analyze_now')),
                                     ),
                                   ],
                                 ),
                               );
-                              if (confirm == true) _resetSeen();
+
+                              if (doAnalysis != true) return;
+
+                              bool? success = await showDialog<bool>(
+                                context: context,
+                                barrierDismissible: false,
+                                builder: (ctx) => ExistingAnalysisDialog(state: state, project: widget.project),
+                              );
+                              if (success == true && mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(state.t('analysis_completed'))));
+                                setState(() { isLoadingAnalysis = true; });
+                                await _loadAnalysisData();
+                                _recalcPhases();
+                              }
                             },
-                            tooltip: 'Reset Seen',
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
+                            child: const Icon(Icons.auto_fix_high, size: 20),
                           ),
+                        ),
                     ],
                   ),
                 ),
@@ -4640,144 +5115,275 @@ class _EditorScreenState extends State<EditorScreen> {
                       borderColor = isDark ? Colors.grey.shade700 : Colors.grey.shade300;
                     }
                     
+                    // Γίνεται expand (ανοίγει το πάνελ ρυθμίσεων) ΜΟΝΟ στη λίστα με τα highlights
+                    final bool isExpanded = (currentPlayingPhase == phase) && showHighlightsOnly;
+                    final double totalDurSecs = (phase.customStartOffset ?? startOffset) + (phase.customEndOffset ?? endOffset) + 0.5;
+                    final String durStr = '${totalDurSecs.toStringAsFixed(1)}s';
+
+                    // Στυλ για Seen φάσεις: Άσπρα, Bold, Αχνή γκρι διαγραφή
+                    final bool isSeenStyle = phase.isSeen && !isActive && !isLastPlayed;
+
                     Widget card = Card(
                       key: GlobalObjectKey(phase),
-                      elevation: 1,
+                      elevation: isExpanded ? 3 : 1, 
                       color: bgColor,
-                      margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                      // Μειώνουμε τα περιθώρια για να γίνουν οι γραμμές πιο "κοντές" (Req 4)
+                      margin: EdgeInsets.symmetric(horizontal: 4, vertical: isExpanded ? 3 : 1),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(4),
+                        borderRadius: BorderRadius.circular(isExpanded ? 8 : 4),
                         side: BorderSide(color: borderColor, width: isActive ? 2 : 1),
                       ),
-                      child: ListTile(
-                        dense: true,
-                        visualDensity: const VisualDensity(horizontal: 0, vertical: -2),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-                        minVerticalPadding: 0,
-                        leading: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (showHighlightsOnly)
-                              ReorderableDragStartListener(
-                                index: index,
-                                child: const Icon(Icons.drag_indicator, color: Colors.grey, size: 20),
-                              ),
-                            if (showHighlightsOnly && phase.isHighlight)
-                              SizedBox(
-                                width: 28,
-                                child: Checkbox(
-                                  visualDensity: VisualDensity.compact,
-                                  value: phase.isSelected,
-                                  onChanged: (v) {
-                                    setState(() => phase.isSelected = v ?? true);
-                                    state.saveProject(widget.project);
-                                  },
-                                ),
-                              ),
-                            SizedBox(
-                              width: 32,
-                              child: IconButton(
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(),
-                                icon: Icon(
-                                  phase.isHighlight ? Icons.star : Icons.star_border,
-                                  color: phase.isHighlight ? Colors.amber : Colors.grey,
-                                  size: 22,
-                                ),
-                                onPressed: () {
-                                  setState(() {
-                                    phase.isHighlight = !phase.isHighlight;
-                                    if (!phase.isHighlight) {
-                                      phase.customStartOffset = null;
-                                      phase.customEndOffset = null;
-                                    }
-                                  });
-                                  state.saveProject(widget.project);
-                                },
-                              ),
-                            ),
-                          ],
-                        ),
-                        title: Center(
-                          child: phase.isHighlight ? SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: Row(
+                      child: InkWell(
+                        onTap: () => _playPhase(index, phases),
+                        borderRadius: BorderRadius.circular(isExpanded ? 8 : 4),
+                        child: AnimatedSize(
+                          duration: const Duration(milliseconds: 250),
+                          curve: Curves.easeInOutCubic,
+                          child: Padding(
+                            // Μειώνουμε το padding εσωτερικά για πιο συμπαγή εμφάνιση (Req 3, 4)
+                            padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                            child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                                  decoration: BoxDecoration(border: Border.all(color: Colors.grey.withOpacity(0.5)), borderRadius: BorderRadius.circular(4)),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
+                                // --- HEADER ROW (Πάντα ορατό) ---
+                                Row(
+                                  children: [
+                                    // 1. Αριστερή Περιοχή (Δυναμικό πλάτος με min, ΧΩΡΙΣ SizedBox)
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        if (showHighlightsOnly) ...[
+                                          ReorderableDragStartListener(
+                                            index: index,
+                                            child: const Padding(
+                                              padding: EdgeInsets.only(right: 2.0),
+                                              child: Icon(Icons.drag_indicator, color: Colors.grey, size: 20),
+                                            ),
+                                          ),
+                                          if (phase.isHighlight)
+                                            Padding(
+                                              padding: const EdgeInsets.only(right: 4.0),
+                                              child: SizedBox(
+                                                width: 24,
+                                                height: 24,
+                                                child: Checkbox(
+                                                  visualDensity: VisualDensity.compact,
+                                                  value: phase.isSelected,
+                                                  onChanged: (v) {
+                                                    setState(() => phase.isSelected = v ?? true);
+                                                    state.saveProject(widget.project);
+                                                  },
+                                                ),
+                                              ),
+                                            ),
+                                        ],
+                                        // Star icon
+                                        IconButton(
+                                          padding: const EdgeInsets.all(2.0),
+                                          constraints: const BoxConstraints(),
+                                          icon: Icon(
+                                            phase.isHighlight ? Icons.star : Icons.star_border,
+                                            color: phase.isHighlight ? Colors.amber : Colors.grey,
+                                            size: 26,
+                                          ),
+                                          onPressed: () async {
+                                            if (phase.isHighlight) {
+                                              final m = (phase.timestamp ~/ 60).toString().padLeft(2, '0');
+                                              final s = (phase.timestamp % 60).toInt().toString().padLeft(2, '0');
+                                              bool? confirm = await showDialog<bool>(
+                                                context: context,
+                                                builder: (ctx) => AlertDialog(
+                                                  title: const Text('Αφαίρεση Highlight', style: TextStyle(fontWeight: FontWeight.bold)),
+                                                  content: RichText(
+                                                    text: TextSpan(
+                                                      style: Theme.of(ctx).textTheme.bodyMedium,
+                                                      children: [
+                                                        TextSpan(text: 'Είστε σίγουροι ότι θέλετε να βγάλετε τη φάση στο $m:$s από τα Highlights; Τυχόν προσαρμοσμένοι χρόνοι (έναρξης/λήξης) που έχετε ορίσει, θα χαθούν. '),
+                                                        const WidgetSpan(
+                                                          alignment: PlaceholderAlignment.middle,
+                                                          child: Icon(Icons.star_outline, color: Colors.red, size: 20),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                  actions: [
+                                                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(state.t('cancel'))),
+                                                    FilledButton(
+                                                      onPressed: () => Navigator.pop(ctx, true),
+                                                      style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+                                                      child: const Text('ΑΦΑΙΡΕΣΗ'),
+                                                    ),
+                                                  ],
+                                                ),
+                                              );
+                                              if (confirm != true) return;
+                                            }
+
+                                            setState(() {
+                                              phase.isHighlight = !phase.isHighlight;
+                                              if (!phase.isHighlight) {
+                                                phase.customStartOffset = null;
+                                                phase.customEndOffset = null;
+                                              }
+                                            });
+                                            state.saveProject(widget.project);
+                                          },
+                                        ),
+                                      ],
+                                    ),
+                                    // 2. Μεσαία Περιοχή: Phase Text (Δυναμική, με Expanded)
+                                    Expanded(
+                                      child: Container(
+                                        alignment: Alignment.center,
+                                        child: Container(
+                                          padding: (isActive || isLastPlayed) ? const EdgeInsets.symmetric(horizontal: 8, vertical: 2) : EdgeInsets.zero,
+                                          decoration: (isActive || isLastPlayed) ? BoxDecoration(
+                                            border: Border.all(color: const Color(0xFF900020), width: 1.5),
+                                            borderRadius: BorderRadius.circular(6),
+                                            color: const Color(0xFF900020).withOpacity(0.1),
+                                          ) : null,
+                                          child: Stack(
+                                            alignment: Alignment.center,
+                                            clipBehavior: Clip.none,
+                                            children: [
+                                              Text(
+                                                '(${chronologicalPhases.indexOf(phase) + 1}) $m:$s', 
+                                                style: TextStyle(
+                                                  fontSize: showHighlightsOnly ? (isExpanded ? 16 : 14) : (isExpanded ? 19 : 17),
+                                                  fontWeight: (isActive || isLastPlayed || isExpanded || isSeenStyle) ? FontWeight.bold : FontWeight.normal, 
+                                                  color: isSeenStyle ? Colors.white.withOpacity(0.85) : (phase.isSeen && !isActive && !isLastPlayed ? Colors.grey : null),
+                                                )
+                                              ),
+                                              if (isSeenStyle)
+                                                Positioned(
+                                                  left: -6, right: -6,
+                                                  child: Container(
+                                                    height: 2.0,
+                                                    color: Colors.grey.withOpacity(0.4),
+                                                  ),
+                                                ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    // 3. Δεξιά Περιοχή (Αυτόματο πλάτος, χωρίς Expanded)
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      mainAxisAlignment: MainAxisAlignment.end,
+                                      children: [
+                                        if (phase.isHighlight) ...[
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: Theme.of(context).colorScheme.primaryContainer,
+                                              borderRadius: BorderRadius.circular(6),
+                                              border: Border.all(color: Theme.of(context).colorScheme.primary.withOpacity(0.4), width: 1.5),
+                                            ),
+                                            child: TweenAnimationBuilder<Color?>(
+                                              key: ValueKey(durStr),
+                                              duration: const Duration(milliseconds: 600),
+                                              tween: ColorTween(begin: Theme.of(context).colorScheme.onPrimaryContainer, end: Theme.of(context).colorScheme.primary),
+                                              builder: (context, color, child) {
+                                                return Text(durStr, style: TextStyle(color: color, fontWeight: FontWeight.w900, fontSize: 13));
+                                              }
+                                            ),
+                                          ),
+                                          if (isExpanded)
+                                            Padding(
+                                              padding: const EdgeInsets.only(left: 4.0), // Μικρύναμε το κενό
+                                              child: InkWell(
+                                                onTap: (phase.customStartOffset != null || phase.customEndOffset != null) ? () {
+                                                  setState(() {
+                                                    phase.customStartOffset = null;
+                                                    phase.customEndOffset = null;
+                                                  });
+                                                  state.saveProject(widget.project);
+                                                } : null,
+                                                borderRadius: BorderRadius.circular(16),
+                                                child: Padding(
+                                                  padding: const EdgeInsets.all(4.0),
+                                                  child: Icon(
+                                                    Icons.restore, 
+                                                    size: 24, // Μικρύναμε το εικονίδιο
+                                                    color: (phase.customStartOffset != null || phase.customEndOffset != null) 
+                                                        ? Theme.of(context).colorScheme.primary 
+                                                        : Theme.of(context).colorScheme.primary.withOpacity(0.6)
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                        ],
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                                // --- EXPANDED CONTROL PANEL ---
+                                if (isExpanded && phase.isHighlight) ...[
+                                  const SizedBox(height: 8), // Λιγότερο κενό
+                                  const Divider(height: 1, thickness: 1),
+                                  const SizedBox(height: 8), // Λιγότερο κενό
+                                  Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      InkWell(onTap: () => _adjustOffset(phase, 'start', 1.0, state), child: const Icon(Icons.arrow_left, size: 18)),
-                                      SizedBox(width: 20, child: Text('${(phase.customStartOffset ?? startOffset).toInt()}s', textAlign: TextAlign.center, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold))),
-                                      InkWell(onTap: () => _adjustOffset(phase, 'start', -1.0, state), child: const Icon(Icons.arrow_right, size: 18)),
+                                      // Αριστερή Στήλη: ΕΝΑΡΞΗ
+                                      Expanded(
+                                        child: Column(
+                                          children: [
+                                            Text('ΕΝΑΡΞΗ', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.primary, letterSpacing: 0.5)),
+                                            const SizedBox(height: 4),
+                                            Container(
+                                              decoration: BoxDecoration(
+                                                color: isDark ? Colors.black26 : Colors.white54,
+                                                border: Border.all(color: Colors.grey.withOpacity(0.3)), 
+                                                borderRadius: BorderRadius.circular(12)
+                                              ),
+                                              child: Row(
+                                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                                children: [
+                                                  IconButton(onPressed: () => _adjustOffset(phase, 'start', 1.0, state), icon: const Icon(Icons.chevron_left, size: 24), visualDensity: VisualDensity.compact),
+                                                  Text('${(phase.customStartOffset ?? startOffset).toInt()}s', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                                  IconButton(onPressed: () => _adjustOffset(phase, 'start', -1.0, state), icon: const Icon(Icons.chevron_right, size: 24), visualDensity: VisualDensity.compact),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      // Δεξιά Στήλη: ΛΗΞΗ
+                                      Expanded(
+                                        child: Column(
+                                          children: [
+                                            Text('ΛΗΞΗ', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.primary, letterSpacing: 0.5)),
+                                            const SizedBox(height: 4),
+                                            Container(
+                                              decoration: BoxDecoration(
+                                                color: isDark ? Colors.black26 : Colors.white54,
+                                                border: Border.all(color: Colors.grey.withOpacity(0.3)), 
+                                                borderRadius: BorderRadius.circular(12)
+                                              ),
+                                              child: Row(
+                                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                                children: [
+                                                  IconButton(onPressed: () => _adjustOffset(phase, 'end', -1.0, state), icon: const Icon(Icons.chevron_left, size: 24), visualDensity: VisualDensity.compact),
+                                                  Text('${(phase.customEndOffset ?? endOffset).toInt()}s', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                                  IconButton(onPressed: () => _adjustOffset(phase, 'end', 1.0, state), icon: const Icon(Icons.chevron_right, size: 24), visualDensity: VisualDensity.compact),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
                                     ],
                                   ),
-                                ),
-                                const SizedBox(width: 12),
-                                Container(
-                                  padding: isActive ? const EdgeInsets.symmetric(horizontal: 4, vertical: 2) : null,
-                                  decoration: isActive ? BoxDecoration(
-                                    border: Border.all(color: const Color(0xFF900020), width: 1.0),
-                                    borderRadius: BorderRadius.circular(4),
-                                  ) : null,
-                                  child: Text(
-                                    '(${chronologicalPhases.indexOf(phase) + 1}) $m:$s', 
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: (isActive || isLastPlayed) ? FontWeight.bold : FontWeight.normal, 
-                                      decoration: phase.isSeen && !isActive && !isLastPlayed ? TextDecoration.lineThrough : null,
-                                      color: phase.isSeen && !isActive && !isLastPlayed ? Colors.grey : null,
-                                    )
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                                  decoration: BoxDecoration(border: Border.all(color: Colors.grey.withOpacity(0.5)), borderRadius: BorderRadius.circular(4)),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      InkWell(onTap: () => _adjustOffset(phase, 'end', -1.0, state), child: const Icon(Icons.arrow_left, size: 18)),
-                                      SizedBox(width: 20, child: Text('${(phase.customEndOffset ?? endOffset).toInt()}s', textAlign: TextAlign.center, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold))),
-                                      InkWell(onTap: () => _adjustOffset(phase, 'end', 1.0, state), child: const Icon(Icons.arrow_right, size: 18)),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                InkWell(
-                                  onTap: () {
-                                    setState(() {
-                                      phase.customStartOffset = null;
-                                      phase.customEndOffset = null;
-                                    });
-                                    state.saveProject(widget.project);
-                                  },
-                                  child: const Icon(Icons.refresh, size: 16, color: Colors.grey),
-                                ),
+                                  // Αφαιρέσαμε το κάτω κουμπί επαναφοράς για εξοικονόμηση χώρου (Req 1, 3)
+                                  const SizedBox(height: 4),
+                                ],
                               ],
-                            ),
-                          ) : Container(
-                            padding: isActive ? const EdgeInsets.symmetric(horizontal: 4, vertical: 2) : null,
-                            decoration: isActive ? BoxDecoration(
-                              border: Border.all(color: const Color(0xFF900020), width: 1.0),
-                              borderRadius: BorderRadius.circular(4),
-                            ) : null,
-                            child: Text(
-                              '(${chronologicalPhases.indexOf(phase) + 1}) $m:$s', 
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: (isActive || isLastPlayed) ? FontWeight.bold : FontWeight.normal, 
-                                decoration: phase.isSeen && !isActive && !isLastPlayed ? TextDecoration.lineThrough : null,
-                                color: phase.isSeen && !isActive && !isLastPlayed ? Colors.grey : null,
-                              )
                             ),
                           ),
                         ),
-                        onTap: () => _playPhase(index, phases),
                       ),
                     );
 

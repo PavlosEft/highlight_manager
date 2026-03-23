@@ -316,9 +316,14 @@ void scheduleClipboardCheck() {
 Future<String> getClipboard() async {
   try {
     final result = await Process.run('powershell', [
-      '-NoProfile', '-Command', '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-Clipboard -Raw'
-    ], stdoutEncoding: utf8, runInShell: true);
-    return result.stdout.toString().trim();
+      '-Sta', '-NoProfile', '-Command', 
+      r"try { Add-Type -AssemblyName System.Windows.Forms; $t = [System.Windows.Forms.Clipboard]::GetText(); if (![string]::IsNullOrEmpty($t)) { [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($t)) } } catch {}"
+    ], runInShell: true);
+    
+    final b64 = result.stdout.toString().trim();
+    if (b64.isEmpty) return '';
+    
+    return utf8.decode(base64Decode(b64), allowMalformed: true);
   } catch (e) {
     return '';
   }
