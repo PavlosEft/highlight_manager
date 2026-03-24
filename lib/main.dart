@@ -14,6 +14,7 @@ import 'package:ffmpeg_kit_flutter_new_min/return_code.dart';
 import 'package:flutter/services.dart';
 import 'dart:math' as math;
 import 'package:window_manager/window_manager.dart';
+import 'package:disk_space_plus/disk_space_plus.dart';
 
 // ==========================================
 // 1. DATA MODELS (Τα δεδομένα μας)
@@ -293,6 +294,16 @@ final lightTheme = ThemeData(
     margin: const EdgeInsets.only(bottom: 12),
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
   ),
+  snackBarTheme: SnackBarThemeData(
+    behavior: SnackBarBehavior.floating,
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(12),
+      // Προσθήκη λεπτού, ανοιχτού μωβ περιγράμματος
+      side: BorderSide(color: Colors.deepPurple.shade200, width: 1.0),
+    ),
+    contentTextStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15, color: Colors.white),
+    backgroundColor: Colors.grey.shade900,
+  ),
 );
 
 final darkTheme = ThemeData(
@@ -304,11 +315,36 @@ final darkTheme = ThemeData(
     margin: const EdgeInsets.only(bottom: 12),
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
   ),
+  snackBarTheme: SnackBarThemeData(
+    behavior: SnackBarBehavior.floating,
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(12),
+      // Προσθήκη λεπτού, ανοιχτού μωβ περιγράμματος (ίδιο και στο Dark mode)
+      side: BorderSide(color: Colors.deepPurple.shade200, width: 1.0),
+    ),
+    contentTextStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15, color: Colors.white),
+    backgroundColor: Colors.grey.shade800,
+  ),
 );
 
 // ==========================================
 // 2. BACKEND / STATE MANAGEMENT
 // ==========================================
+
+Future<void> safeDeleteDir(Directory dir) async {
+  int retries = 0;
+  while (retries < 30) { // Δοκιμάζει για μέγιστο 3 δευτερόλεπτα (30 * 100ms)
+    try {
+      if (await dir.exists()) {
+        await dir.delete(recursive: true);
+      }
+      break; // Αν πετύχει, βγαίνει από τη λούπα αμέσως
+    } catch (_) {
+      retries++;
+      await Future.delayed(const Duration(milliseconds: 100)); // Περιμένει λίγο και ξαναδοκιμάζει
+    }
+  }
+}
 
 Future<Map<String, dynamic>> _analyzePcmTask(Map<String, dynamic> args) async {
   final String path = args['path'];
@@ -399,6 +435,13 @@ class AppState extends ChangeNotifier {
         final tempDir = await getTemporaryDirectory();
         final thumbDir = Directory('${tempDir.path}/hm_temp_thumbs');
         if (await thumbDir.exists()) await thumbDir.delete(recursive: true);
+        
+        final entities = tempDir.listSync();
+        for (var entity in entities) {
+          if (entity is Directory && entity.path.split(Platform.pathSeparator).last.startsWith('temp_')) {
+            try { await entity.delete(recursive: true); } catch (_) {}
+          }
+        }
       } catch (_) {}
       
     } catch (_) {}
@@ -1054,9 +1097,7 @@ class AppState extends ChangeNotifier {
 
     } catch (e) {
       print('[ANALYZE] ΣΦΑΛΜΑ κατά την ανάλυση: $e');
-      if (await projectDir.exists()) {
-        await projectDir.delete(recursive: true);
-      }
+      await safeDeleteDir(projectDir); // Χρήση του έξυπνου μηχανισμού για διαγραφή
       return null;
     }
   }
@@ -1460,6 +1501,21 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
 
   static const platform = MethodChannel('com.example.highlight_manager/native_picker');
 
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _cleanTempThumbs();
+    super.dispose();
+  }
+
+  Future<void> _cleanTempThumbs() async {
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final thumbDir = Directory('${tempDir.path}/hm_temp_thumbs');
+      if (await thumbDir.exists()) await thumbDir.delete(recursive: true);
+    } catch (_) {}
+  }
+
   void _pickFiles() async {
     if (_isPickingFiles) return;
     setState(() {
@@ -1467,6 +1523,16 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
     });
 
     try {
+      if (Platform.isAndroid || Platform.isIOS) {
+        try {
+          final tempDir = await getTemporaryDirectory();
+          final thumbDir = Directory('${tempDir.path}/hm_temp_thumbs');
+          if (await thumbDir.exists()) await thumbDir.delete(recursive: true);
+        } catch (_) {}
+      } else if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+        // TODO: Θα υλοποιηθεί αργότερα όταν δοκιμαστεί το Desktop (Καθαρισμός hm_temp_thumbs ΠΡΙΝ την επιλογή)
+      }
+
       if (Platform.isAndroid) {
         final List<dynamic>? result = await platform.invokeListMethod('pickVideos');
         if (result != null && result.isNotEmpty) {
@@ -1790,6 +1856,9 @@ class _NewProjectVideoItemState extends State<NewProjectVideoItem> {
   bool _showJumpIndicator = false;
   String _jumpText = "";
   Timer? _jumpTimer;
+  Timer? _offsetDelayTimer;
+  Timer? _offsetTimer;
+  int _offsetTicks = 0;
 
   static const platform = MethodChannel('com.example.highlight_manager/native_picker');
 
@@ -2429,6 +2498,38 @@ class HomeScreen extends StatelessWidget {
                   final exportDir = Directory(exportPath);
                   if (!exportDir.existsSync()) exportDir.createSync(recursive: true);
 
+                  // --- ΑΚΤΙΝΟΓΡΑΦΙΑ CACHE ---
+                  try {
+                    final tempDir = await getTemporaryDirectory();
+                    final reportFile = File('$exportPath/cache_report.txt');
+                    StringBuffer sb = StringBuffer();
+                    sb.writeln('=== HIGHLIGHT MANAGER CACHE REPORT ===');
+                    sb.writeln('Date: ${DateTime.now().toString()}');
+                    sb.writeln('--------------------------------------');
+                    
+                    int totalBytes = 0;
+                    if (tempDir.existsSync()) {
+                      final entities = tempDir.listSync(recursive: true);
+                      for (var entity in entities) {
+                        if (entity is File) {
+                          int size = entity.lengthSync();
+                          totalBytes += size;
+                          String mb = (size / (1024 * 1024)).toStringAsFixed(2);
+                          String lastMod = entity.lastModifiedSync().toString().split('.')[0];
+                          sb.writeln('FILE: ${entity.path.split(Platform.pathSeparator).last} | Μέγεθος: $mb MB | Ημ/νια: $lastMod');
+                        } else if (entity is Directory) {
+                          sb.writeln('DIR:  ${entity.path.split(Platform.pathSeparator).last}');
+                        }
+                      }
+                    }
+                    sb.writeln('--------------------------------------');
+                    sb.writeln('ΣΥΝΟΛΙΚΟ ΜΕΓΕΘΟΣ CACHE: ${(totalBytes / (1024 * 1024)).toStringAsFixed(2)} MB');
+                    reportFile.writeAsStringSync(sb.toString());
+                  } catch (e) {
+                    File('$exportPath/cache_report.txt').writeAsStringSync('Σφάλμα δημιουργίας αναφοράς: $e');
+                  }
+                  // --- ΤΕΛΟΣ ΑΚΤΙΝΟΓΡΑΦΙΑΣ ---
+
                   final appDir = await getApplicationDocumentsDirectory();
                   final hmDir = Directory('${appDir.path}/HighlightManager');
                   int count = 0;
@@ -2776,16 +2877,63 @@ class ExportProgressDialog extends StatefulWidget {
 }
 
 class _ExportProgressDialogState extends State<ExportProgressDialog> {
-  String status = "Προετοιμασία...";
+  String status = "Εκκίνηση...";
   double progress = 0.0;
   bool isFinished = false;
   bool isCancelled = false;
   Process? _activeProcess;
 
+  DateTime? startTime;
+  Timer? timer;
+  String elapsedTimeStr = "00:00";
+  String etaStr = "--:--";
+  double totalExportSeconds = 0.0;
+  double completedSeconds = 0.0;
+
+  String _formatDuration(Duration d) {
+    int m = d.inMinutes.remainder(60);
+    int s = d.inSeconds.remainder(60);
+    int h = d.inHours;
+    if (h > 0) return "${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}";
+    return "${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}";
+  }
+
   @override
   void initState() {
     super.initState();
+    
+    // Υπολογισμός συνολικών δευτερολέπτων εξαγωγής για το progress
+    for (var phase in widget.highlights) {
+      totalExportSeconds += (phase.customStartOffset ?? widget.startOffset) + (phase.customEndOffset ?? widget.endOffset) + 0.5;
+    }
+    if (widget.mode == 'join' && widget.config['trans_path'] != '') {
+      totalExportSeconds += widget.config['trans_dur'] as double;
+    }
+
+    startTime = DateTime.now();
+    timer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (mounted && startTime != null && !isCancelled && progress < 1.0) {
+        final elapsed = DateTime.now().difference(startTime!);
+        final elapsedSec = elapsed.inSeconds;
+        
+        setState(() {
+          elapsedTimeStr = _formatDuration(elapsed);
+          if (progress > 0.02) { 
+            final totalEstimatedSec = elapsedSec / progress;
+            final remainingSec = totalEstimatedSec - elapsedSec;
+            etaStr = _formatDuration(Duration(seconds: remainingSec.toInt()));
+          }
+        });
+      }
+    });
+
     _startExport();
+  }
+
+  @override
+  void dispose() {
+    timer?.cancel();
+    super.dispose();
   }
 
   ({String path, double localSeconds}) _getLocalVideoData(double globalSeconds) {
@@ -2828,13 +2976,31 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
     throw Exception('Δεν βρέθηκε το ffmpeg.exe!');
   }
 
-  Future<int> _runFFmpeg(List<String> args) async {
+  Future<int> _runFFmpeg(List<String> args, {double stepDuration = 0.0}) async {
     if (isCancelled) return 255;
     if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
       final ffmpegExe = await _getDesktopFFmpegPath();
       _activeProcess = await Process.start(ffmpegExe, args);
       _activeProcess!.stdout.drain();
-      _activeProcess!.stderr.drain();
+      
+      _activeProcess!.stderr.transform(utf8.decoder).transform(const LineSplitter()).listen((line) {
+        if (stepDuration > 0 && totalExportSeconds > 0) {
+          final timeMatch = RegExp(r"time=(\d{2}):(\d{2}):(\d{2}\.\d{2})").firstMatch(line);
+          if (timeMatch != null) {
+            double h = double.tryParse(timeMatch.group(1)!) ?? 0;
+            double m = double.tryParse(timeMatch.group(2)!) ?? 0;
+            double s = double.tryParse(timeMatch.group(3)!) ?? 0;
+            double current = (h * 3600) + (m * 60) + s;
+            if (current > stepDuration) current = stepDuration;
+            if (mounted) {
+              setState(() {
+                progress = (completedSeconds + current) / totalExportSeconds;
+              });
+            }
+          }
+        }
+      });
+      
       return await _activeProcess!.exitCode;
     } else {
       List<String> safeArgs = [];
@@ -2850,22 +3016,56 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
           safeArgs.add(arg);
         }
       }
-      final session = await FFmpegKit.executeWithArguments(safeArgs);
-      final returnCode = await session.getReturnCode();
-      if (returnCode?.isValueSuccess() != true) {
-        final logs = await session.getAllLogsAsString();
-        try {
-          final dir = await getApplicationDocumentsDirectory();
-          final errFile = File('${dir.path}/HighlightManager/${widget.project.id}/ffmpeg_error.txt');
-          await errFile.writeAsString('CMD: ${safeArgs.join(' ')}\n\nLOGS:\n$logs');
-        } catch (_) {}
-      }
-      return returnCode?.isValueSuccess() == true ? 0 : 1;
+      
+      final completer = Completer<int>();
+      FFmpegKit.executeWithArgumentsAsync(
+        safeArgs,
+        (session) async {
+          final returnCode = await session.getReturnCode();
+          if (returnCode?.isValueSuccess() != true) {
+            final logs = await session.getAllLogsAsString();
+            try {
+              final dir = await getApplicationDocumentsDirectory();
+              final errFile = File('${dir.path}/HighlightManager/${widget.project.id}/ffmpeg_error.txt');
+              await errFile.writeAsString('CMD: ${safeArgs.join(' ')}\n\nLOGS:\n$logs');
+            } catch (_) {}
+          }
+          completer.complete(returnCode?.isValueSuccess() == true ? 0 : 1);
+        },
+        (log) {},
+        (statistics) {
+          if (stepDuration > 0 && totalExportSeconds > 0) {
+            double current = statistics.getTime() / 1000.0;
+            if (current > stepDuration) current = stepDuration;
+            if (mounted) {
+              setState(() {
+                progress = (completedSeconds + current) / totalExportSeconds;
+              });
+            }
+          }
+        }
+      );
+      return await completer.future;
     }
   }
 
   Future<void> _startExport() async {
+    Directory? activeTempDir;
     try {
+      if (Platform.isAndroid || Platform.isIOS) {
+        try {
+          final tempDir = await getTemporaryDirectory();
+          final entities = tempDir.listSync();
+          for (var entity in entities) {
+            if (entity is Directory && entity.path.split(Platform.pathSeparator).last.startsWith('temp_')) {
+              try { await entity.delete(recursive: true); } catch (_) {}
+            }
+          }
+        } catch (_) {}
+      } else if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+        // TODO: Θα υλοποιηθεί αργότερα όταν δοκιμαστεί το Desktop (Καθαρισμός ορφανών temp_ φακέλων ΠΡΙΝ το export)
+      }
+
       final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
       Directory tempDir;
       if (Platform.isAndroid || Platform.isIOS) {
@@ -2874,6 +3074,7 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
       } else {
         tempDir = Directory('${widget.outDir}/temp_$timestamp');
       }
+      activeTempDir = tempDir;
       await tempDir.create(recursive: true);
 
       final isCompress = widget.config['compress'] as bool;
@@ -2896,8 +3097,7 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
         for (int i = 0; i < widget.highlights.length; i++) {
           if (isCancelled) throw Exception('Cancelled');
           setState(() {
-            status = "Εξαγωγή ${i + 1}/${widget.highlights.length}...";
-            progress = i / widget.highlights.length;
+            status = "Αποθήκευση κλιπ ${i + 1} από ${widget.highlights.length}...";
           });
 
           final ts = widget.highlights[i].timestamp;
@@ -2914,8 +3114,11 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
             ...videoParams, '-c:a', 'aac', tempOutPath
           ];
           
-          final code = await _runFFmpeg(args);
-          if (code != 0 && !isCancelled) throw Exception('FFmpeg error');
+          final code = await _runFFmpeg(args, stepDuration: dur);
+          if (isCancelled) throw Exception('Cancelled');
+          if (code != 0) throw Exception('FFmpeg error');
+          
+          completedSeconds += dur;
           
           try {
             await File(tempOutPath).copy(finalOutPath);
@@ -2930,7 +3133,7 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
         String transTemp = '';
 
         if (transPath.isNotEmpty) {
-          setState(() => status = "Προετοιμασία Transition...");
+          setState(() => status = "Δημιουργία εφέ μετάβασης...");
           transTemp = '${tempDir.path}/trans.mp4';
           final isImage = transPath.toLowerCase().endsWith('.jpg') || transPath.toLowerCase().endsWith('.png');
           
@@ -2942,14 +3145,16 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
             '-t', transDur.toString(),
             ...videoParams, '-c:a', 'aac', '-f', 'mp4', transTemp
           ]);
-          await _runFFmpeg(trArgs);
+          final trCode = await _runFFmpeg(trArgs, stepDuration: transDur);
+          if (isCancelled) throw Exception('Cancelled');
+          if (trCode != 0) throw Exception('FFmpeg error');
+          completedSeconds += transDur;
         }
 
         for (int i = 0; i < widget.highlights.length; i++) {
           if (isCancelled) throw Exception('Cancelled');
           setState(() {
-            status = "Προετοιμασία ${i + 1}/${widget.highlights.length}...";
-            progress = i / widget.highlights.length * 0.9;
+            status = "Επεξεργασία σκηνής ${i + 1} από ${widget.highlights.length}...";
           });
 
           final ts = widget.highlights[i].timestamp;
@@ -2964,15 +3169,19 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
             '-y', '-ss', localData.localSeconds.toStringAsFixed(3), '-i', localData.path, '-t', dur.toString(),
             ...videoParams, '-c:a', 'aac', '-vf', 'scale=1920:1080', clipTemp
           ];
-          final code = await _runFFmpeg(args);
-          if (code != 0 && !isCancelled) throw Exception('FFmpeg error');
+          final code = await _runFFmpeg(args, stepDuration: dur);
+          if (isCancelled) throw Exception('Cancelled');
+          if (code != 0) throw Exception('FFmpeg error');
+          
+          completedSeconds += dur;
           processedClips.add(clipTemp);
         }
 
         if (isCancelled) throw Exception('Cancelled');
         setState(() {
-          status = "Ένωση αρχείων (Finalizing)...";
-          progress = 0.95;
+          status = "Τελικό μοντάζ (σχεδόν έτοιμο!)...";
+          // Δίνουμε ένα τεχνητό >99% γιατί η ένωση (concat) παίρνει κάποια δευτερόλεπτα
+          progress = 0.99; 
         });
 
         final listFile = File('${tempDir.path}/inputs.txt');
@@ -2993,7 +3202,8 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
           '-y', '-f', 'concat', '-safe', '0', '-i', listFile.path, '-c', 'copy', mergedOutTemp
         ];
         final code = await _runFFmpeg(catArgs);
-        if (code != 0 && !isCancelled) throw Exception('FFmpeg error concat');
+        if (isCancelled) throw Exception('Cancelled');
+        if (code != 0) throw Exception('FFmpeg error concat');
         
         try {
           await File(mergedOutTemp).copy(mergedOutFinal);
@@ -3001,7 +3211,6 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
           throw Exception('Αποτυχία αποθήκευσης στο φάκελο: $e');
         }
         
-        try { await tempDir.delete(recursive: true); } catch (_) {}
       }
 
       if (isCancelled) throw Exception('Cancelled');
@@ -3017,32 +3226,71 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
           isFinished = true;
         });
       }
+    } finally {
+      if (activeTempDir != null) {
+        await safeDeleteDir(activeTempDir); // Χρήση του έξυπνου μηχανισμού για διαγραφή
+      }
+      // Κλείνουμε το παράθυρο αμέσως μόλις ολοκληρωθεί η ακύρωση και διαγραφούν τα σκουπίδια
+      if (isCancelled && mounted) {
+        Navigator.pop(context);
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = MediaQuery.of(context).size.width > 600;
     return AlertDialog(
+      insetPadding: isDesktop ? const EdgeInsets.symmetric(horizontal: 40.0, vertical: 24.0) : const EdgeInsets.symmetric(horizontal: 24.0, vertical: 24.0),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       title: FittedBox(
         fit: BoxFit.scaleDown,
         alignment: Alignment.centerLeft,
-        child: Text(isFinished ? 'Ολοκληρώθηκε' : 'Επεξεργασία...', style: const TextStyle(fontWeight: FontWeight.bold)),
+        child: Text(isFinished ? 'Ολοκληρώθηκε!' : 'Δημιουργία Βίντεο...', style: const TextStyle(fontWeight: FontWeight.bold)),
       ),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(status, textAlign: TextAlign.center),
-          const SizedBox(height: 16),
-          LinearProgressIndicator(value: progress),
-          const SizedBox(height: 8),
-          Text('${(progress * 100).toInt()}%', style: const TextStyle(fontWeight: FontWeight.bold)),
-        ],
+      content: SizedBox(
+        width: isDesktop ? 400 : MediaQuery.of(context).size.width,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            LinearProgressIndicator(value: progress > 0 ? progress : null, minHeight: 6, borderRadius: BorderRadius.circular(4)),
+            const SizedBox(height: 20),
+            Text(status, textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            const SizedBox(height: 24),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                Column(
+                  children: [
+                    const Text('Χρόνος', style: TextStyle(fontSize: 14, color: Colors.grey)),
+                    const SizedBox(height: 4),
+                    Text(elapsedTimeStr, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                  ],
+                ),
+                Column(
+                  children: [
+                    const Text('Πρόοδος', style: TextStyle(fontSize: 14, color: Colors.grey)),
+                    const SizedBox(height: 4),
+                    Text('${(progress * 100).toStringAsFixed(1)}%', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                  ],
+                ),
+                Column(
+                  children: [
+                    const Text('Εκτίμηση', style: TextStyle(fontSize: 14, color: Colors.grey)),
+                    const SizedBox(height: 4),
+                    Text(etaStr, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                  ],
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
       actions: [
         if (!isFinished)
           TextButton(
             onPressed: isCancelled ? null : _cancel,
-            child: Text(isCancelled ? 'ΑΚΥΡΩΝΕΤΑΙ...' : 'ΑΚΥΡΩΣΗ', style: const TextStyle(color: Colors.red)),
+            child: Text(isCancelled ? 'ΑΚΥΡΩΝΕΤΑΙ...' : 'ΑΚΥΡΩΣΗ', style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 16)),
           )
         else
           FilledButton(
@@ -3292,6 +3540,10 @@ class _EditorScreenState extends State<EditorScreen> {
   
   List<HighlightPhase> historyStack = [];
   List<HighlightPhase> forwardStack = [];
+
+  Timer? _offsetDelayTimer;
+  Timer? _offsetTimer;
+  int _offsetTicks = 0;
 
   // --- UI Settings State ---
   late double sensitivity;
@@ -3641,6 +3893,8 @@ class _EditorScreenState extends State<EditorScreen> {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     }
     _seekTimer?.cancel();
+    _offsetDelayTimer?.cancel();
+    _offsetTimer?.cancel();
     playingSub?.cancel();
     durationSub?.cancel();
     positionSub?.cancel();
@@ -3658,38 +3912,88 @@ class _EditorScreenState extends State<EditorScreen> {
     return "${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}";
   }
 
-  void _adjustOffset(HighlightPhase phase, String type, double delta, AppState state) {
+  void _updateOffsetDelta(HighlightPhase phase, String type, double delta, AppState state, {bool isFinal = false}) {
     setState(() {
       if (type == 'start') {
         double current = phase.customStartOffset ?? startOffset;
-        phase.customStartOffset = math.max(0.0, current + delta);
+        double newValue = current + delta;
+        // Προστασία Ορίων: Δεν επιτρέπουμε αρνητικό offset, και δεν επιτρέπουμε να βγει εκτός βίντεο
+        newValue = newValue.clamp(0.0, phase.timestamp);
+        phase.customStartOffset = newValue;
       } else {
         double current = phase.customEndOffset ?? endOffset;
-        phase.customEndOffset = math.max(0.0, current + delta);
+        double newValue = current + delta;
+        newValue = newValue.clamp(0.0, math.max(0.0, widget.project.totalDuration - phase.timestamp));
+        phase.customEndOffset = newValue;
       }
       currentPlayingPhase = phase;
       activePhaseIndex = _filteredPhases.indexOf(phase);
       phase.isSeen = true;
       isTrackingPhase = true;
       isAutoplaySuspended = false;
-      isSeeking = true;
+      if (isFinal) isSeeking = true;
     });
-    state.saveProject(widget.project);
-    
-    double previewStart = math.max(0.0, phase.timestamp - (phase.customStartOffset ?? startOffset));
-    if (type == 'end') {
-      double previewEnd = phase.timestamp + (phase.customEndOffset ?? endOffset);
-      previewStart = math.max(0.0, previewEnd - 2.0);
-    }
-    
-    _seekGlobal(previewStart).then((_) {
-      if (mounted) {
-        setState(() {
-          isSeeking = false;
-        });
+
+    if (isFinal) {
+      state.saveProject(widget.project);
+      double previewStart = math.max(0.0, phase.timestamp - (phase.customStartOffset ?? startOffset));
+      if (type == 'end') {
+        double previewEnd = phase.timestamp + (phase.customEndOffset ?? endOffset);
+        previewStart = math.max(0.0, previewEnd - 2.0);
       }
-      player.play();
-    });
+      
+      _seekGlobal(previewStart).then((_) {
+        if (mounted) {
+          setState(() {
+            isSeeking = false;
+          });
+        }
+        player.play();
+      });
+    }
+  }
+
+  Widget _buildOffsetButton(HighlightPhase phase, String type, double direction, AppState state, IconData icon) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapDown: (_) {
+        _offsetTicks = 0;
+        _offsetDelayTimer?.cancel();
+        _offsetTimer?.cancel();
+        // Ξεκινάει το "κράτημα" μετά από 350ms
+        _offsetDelayTimer = Timer(const Duration(milliseconds: 350), () {
+          _offsetTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
+            _offsetTicks++;
+            double step = 1.0;
+            if (_offsetTicks > 30) step = 5.0; // Πολύ γρήγορα μετά από 3 δευτερόλεπτα
+            else if (_offsetTicks > 15) step = 2.0; // Πιο γρήγορα μετά από 1.5 δευτερόλεπτο
+            _updateOffsetDelta(phase, type, direction * step, state, isFinal: false);
+          });
+        });
+      },
+      onTapUp: (_) {
+        _offsetDelayTimer?.cancel();
+        if (_offsetTimer != null && _offsetTimer!.isActive) {
+           _offsetTimer?.cancel();
+           // Απελευθέρωση μετά από Long Press -> Κάνουμε το τελικό Seek
+           _updateOffsetDelta(phase, type, 0.0, state, isFinal: true);
+        } else {
+           // Απλό Tap
+           _updateOffsetDelta(phase, type, direction, state, isFinal: true);
+        }
+      },
+      onTapCancel: () {
+        _offsetDelayTimer?.cancel();
+        if (_offsetTimer != null && _offsetTimer!.isActive) {
+           _offsetTimer?.cancel();
+           _updateOffsetDelta(phase, type, 0.0, state, isFinal: true);
+        }
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+        child: Icon(icon, size: 24, color: Theme.of(context).colorScheme.primary),
+      ),
+    );
   }
 
   void _addManualHighlight() {
@@ -4859,8 +5163,9 @@ class _EditorScreenState extends State<EditorScreen> {
                                   text: TextSpan(
                                     style: Theme.of(ctx).textTheme.bodyMedium,
                                     children: [
-                                      const TextSpan(text: 'Θέλετε να επαναφέρετε όλες τις φάσεις που έχουν ήδη παίξει;\n\nΗ εφαρμογή τις μαρκάρει (με διακριτή γραμμή) όταν τις βλέπετε, ώστε να μπορεί να τις προσπερνάει αυτόματα όταν έχετε ενεργό το φίλτρο \'Skip Seen\' στις ρυθμίσεις. Με την επαναφορά, θα εμφανίζονται όλες σαν να μην τις έχετε δει ακόμα και δεν θα παραλείπονται πλέον από το φίλτρο. '),
-                                      WidgetSpan(
+                                      const TextSpan(text: 'Οι φάσεις που έχετε δει θα επανέλθουν και '),
+                                      const TextSpan(text: 'δεν θα παραλείπονται', style: TextStyle(fontWeight: FontWeight.bold)),
+                                      const TextSpan(text: ' από το φίλτρο στις ρυθμίσεις. '),WidgetSpan(
                                         alignment: PlaceholderAlignment.middle,
                                         child: Icon(Icons.settings, color: Theme.of(context).colorScheme.primary.withOpacity(0.6), size: 18),
                                       ),
@@ -5198,10 +5503,19 @@ class _EditorScreenState extends State<EditorScreen> {
                                                     text: TextSpan(
                                                       style: Theme.of(ctx).textTheme.bodyMedium,
                                                       children: [
-                                                        TextSpan(text: 'Είστε σίγουροι ότι θέλετε να βγάλετε τη φάση στο $m:$s από τα Highlights; Τυχόν προσαρμοσμένοι χρόνοι (έναρξης/λήξης) που έχετε ορίσει, θα χαθούν. '),
-                                                        const WidgetSpan(
+                                                        TextSpan(text: 'Είστε σίγουροι ότι θέλετε να βγάλετε τη φάση στο $m:$s από τα Highlights; '),
+                                                        WidgetSpan(
                                                           alignment: PlaceholderAlignment.middle,
-                                                          child: Icon(Icons.star_outline, color: Colors.red, size: 20),
+                                                          child: Stack(
+                                                            alignment: Alignment.center,
+                                                            children: [
+                                                              const Icon(Icons.star, color: Colors.amber, size: 22),
+                                                              Transform.rotate(
+                                                                angle: -math.pi / 4.0,
+                                                                child: Container(width: 24, height: 2.5, color: Colors.red),
+                                                              ),
+                                                            ],
+                                                          ),
                                                         ),
                                                       ],
                                                     ),
@@ -5341,9 +5655,9 @@ class _EditorScreenState extends State<EditorScreen> {
                                               child: Row(
                                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                                 children: [
-                                                  IconButton(onPressed: () => _adjustOffset(phase, 'start', 1.0, state), icon: const Icon(Icons.chevron_left, size: 24), visualDensity: VisualDensity.compact),
+                                                  _buildOffsetButton(phase, 'start', 1.0, state, Icons.chevron_left),
                                                   Text('${(phase.customStartOffset ?? startOffset).toInt()}s', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                                                  IconButton(onPressed: () => _adjustOffset(phase, 'start', -1.0, state), icon: const Icon(Icons.chevron_right, size: 24), visualDensity: VisualDensity.compact),
+                                                  _buildOffsetButton(phase, 'start', -1.0, state, Icons.chevron_right),
                                                 ],
                                               ),
                                             ),
@@ -5366,9 +5680,9 @@ class _EditorScreenState extends State<EditorScreen> {
                                               child: Row(
                                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                                 children: [
-                                                  IconButton(onPressed: () => _adjustOffset(phase, 'end', -1.0, state), icon: const Icon(Icons.chevron_left, size: 24), visualDensity: VisualDensity.compact),
+                                                  _buildOffsetButton(phase, 'end', -1.0, state, Icons.chevron_left),
                                                   Text('${(phase.customEndOffset ?? endOffset).toInt()}s', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                                                  IconButton(onPressed: () => _adjustOffset(phase, 'end', 1.0, state), icon: const Icon(Icons.chevron_right, size: 24), visualDensity: VisualDensity.compact),
+                                                  _buildOffsetButton(phase, 'end', 1.0, state, Icons.chevron_right),
                                                 ],
                                               ),
                                             ),
@@ -5448,6 +5762,92 @@ class _EditorScreenState extends State<EditorScreen> {
     if (highlights.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Δεν υπάρχουν επιλεγμένα Highlights για εξαγωγή!')));
       return;
+    }
+
+    /* =======================================================================
+    [ΟΔΗΓΙΕΣ ΔΟΚΙΜΩΝ / TESTING PLAN]
+    
+    Πώς θα επιβεβαιώσεις πρακτικά ότι όλα δουλεύουν άψογα:
+    
+    1. Δοκιμή Πρόβλεψης Χώρου (Αυτό το Patch):
+       - Επίλεξε μερικά highlights και πάτα Export. Θα δεις το νέο παράθυρο 
+         διαλόγου με τον ακριβή υπολογισμό σε MB (Υπολογίζει αυτόματα x2, 
+         καλύπτοντας τις ανάγκες για τα temp αρχεία ΚΑΙ το τελικό βίντεο).
+         
+    2. Δοκιμή Ασφαλούς Τερματισμού (Το Finally Block του προηγούμενου Patch):
+       - Ξεκίνα κανονικά το Export.
+       - Στη μέση της διαδικασίας, πάτα το κουμπί "ΑΚΥΡΩΣΗ". 
+       - Σύνδεσε το κινητό ή άνοιξε έναν File Manager στο Android. 
+       - Έλεγξε τον φάκελο Cache της εφαρμογής. Ο φάκελος "temp_..." θα 
+         πρέπει να έχει διαγραφεί ολοκληρωτικά και ακαριαία.
+         
+    3. Δοκιμή Βίαιης Διακοπής (Το Startup Cleanup του προηγούμενου Patch):
+       - Ξεκίνα ένα νέο Export.
+       - Τράβα το καλώδιο ρεύματος ή κλείσε εντελώς (Force Quit / Swipe up) 
+         την εφαρμογή από τα πρόσφατα όσο η διαδικασία "τρέχει".
+       - Σε αυτή τη φάση ο φάκελος temp έχει μείνει "σκουπίδι" μέσα στο κινητό.
+       - Άνοιξε ξανά την εφαρμογή κανονικά. 
+       - Η ρουτίνα _initApp() που προσθέσαμε θα βρει αυτόματα αυτόν τον 
+         "ορφανό" φάκελο και θα τον διαγράψει αθόρυβα στο background.
+    =======================================================================
+    */
+
+    double totalExportSeconds = 0.0;
+    for (var phase in highlights) {
+      totalExportSeconds += (phase.customStartOffset ?? startOffset) + (phase.customEndOffset ?? endOffset) + 0.5;
+    }
+
+    // Έξυπνος υπολογισμός απαιτούμενου χώρου με βάση το πραγματικό bitrate
+    double totalSourceMB = 0.0;
+    double totalSourceSeconds = widget.project.totalDuration > 0 ? widget.project.totalDuration : 1.0;
+    for (int size in widget.project.videoSizes) {
+      totalSourceMB += size / (1024 * 1024);
+    }
+    
+    // Αν λείπουν τα μεγέθη (π.χ. παλιό project), fallback στο "βαρύ" 1.5 MB/s
+    double avgMBps = totalSourceMB > 0 ? (totalSourceMB / totalSourceSeconds) : 1.5;
+    
+    // Χρειαζόμαστε: (Διάρκεια * MB/s) * 2 (Για τα temp clips + τελικό αρχείο) + 50MB "μαξιλαράκι" ασφάλειας
+    final requiredSpaceMB = (totalExportSeconds * avgMBps * 2) + 50;
+
+    try {
+      DiskSpacePlus diskSpacePlus = DiskSpacePlus();
+      double? freeSpaceMB = await diskSpacePlus.getFreeDiskSpace;
+      
+      if (freeSpaceMB != null && freeSpaceMB < requiredSpaceMB) {
+        final requiredGB = requiredSpaceMB / 1024;
+        final missingGB = (requiredSpaceMB - freeSpaceMB) / 1024;
+        
+        if (mounted) {
+          await showDialog(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Ανεπαρκής Χώρος', style: TextStyle(fontWeight: FontWeight.bold)),
+              // Προσθήκη Padding για να έχει "αέρα" το παράθυρο δεξιά-αριστερά
+              contentPadding: const EdgeInsets.fromLTRB(30.0, 20.0, 30.0, 20.0),
+              content: RichText(
+                text: TextSpan(
+                  style: Theme.of(ctx).textTheme.bodyMedium,
+                  children: [
+                    const TextSpan(text: 'Απαιτείται χώρος '),
+                    // Χρησιμοποιούμε '\u00A0' (Non-breaking Space) για να μένει πάντα ο αριθμός με το GB
+                    TextSpan(text: '${requiredGB.toStringAsFixed(1)}\u00A0GB', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.orange)),
+                    const TextSpan(text: '.\n\nΠαρακαλώ ελευθερώστε '),
+                    TextSpan(text: '${missingGB.toStringAsFixed(1)}\u00A0GB', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+                    const TextSpan(text: ' και ξαναπροσπαθήστε.'),
+                  ],
+                ),
+              ),
+              actions: [
+                FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('ΟΚ')),
+              ],
+            ),
+          );
+        }
+        return; // Σταματάει η διαδικασία εξαγωγής (Blocker)
+      }
+    } catch (e) {
+      debugPrint('Storage check failed: $e'); // Fail-safe: Προχωράμε αν σκάσει το plugin σε κάποιο περίεργο περιβάλλον
     }
 
     final result = await showDialog<Map<String, dynamic>>(
