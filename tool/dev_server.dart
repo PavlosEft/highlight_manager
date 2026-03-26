@@ -190,6 +190,19 @@ Future<String> detectDevice() async {
 Future<void> wakeUpApp(String device) async {
   await Process.run('adb', ['-s', device, 'forward', '--remove-all'], runInShell: true);
   await Process.run('adb', ['-s', device, 'shell', 'am', 'force-stop', 'com.example.highlight_manager'], runInShell: true);
+  
+  // Καθαρισμός με Debugging: Καταγραφή σε Αρχείο
+  print('\n[DEBUG] Στέλνω εντολή διαγραφής (Καταγραφή σε αρχείο)...');
+  final result = await Process.run('adb', ['-s', device, 'shell', 'run-as com.example.highlight_manager rm -rf highlight_manager*'], runInShell: true);
+  
+  try {
+    final debugFile = File('tool/adb_debug.txt');
+    String logContent = '=== ADB DELETE LOG ===\nDate: ${DateTime.now()}\n\n';
+    logContent += '[STDOUT]:\n${result.stdout}\n\n';
+    logContent += '[STDERR]:\n${result.stderr}\n';
+    debugFile.writeAsStringSync(logContent);
+  } catch (_) {}
+  
   await Process.run('adb', ['-s', device, 'shell', 'am', 'start', '-n', 'com.example.highlight_manager/.MainActivity'], runInShell: true);
   await Future.delayed(const Duration(seconds: 3)); // Δίνουμε χρόνο να ανοίξει η εφαρμογή
 }

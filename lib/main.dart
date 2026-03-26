@@ -203,9 +203,7 @@ const Map<String, Map<String, String>> translations = {
     'sync_err': 'Σφάλμα κατά τη διαδικασία: ',
     'sync_no_ext': 'Δεν βρέθηκε εξωτερικός χώρος αποθήκευσης.',
     'relink_title': 'Αρχεία που λείπουν',
-    'relink_msg': 'Κάποια βίντεο μετακινήθηκαν ή διαγράφηκαν. Η εφαρμογή θα προσπαθήσει να τα βρει αυτόματα.',
-    'relink_searching': 'Αναζήτηση: {name}',
-    'relink_failed': 'Το αρχείο δεν βρέθηκε αυτόματα. Παρακαλώ εντοπίστε το χειροκίνητα:',
+    'relink_msg': 'Κάποια βίντεο μετακινήθηκαν ή διαγράφηκαν. Παρακαλώ εντοπίστε τα αρχεία για να συνεχίσετε.',
     'relink_manual_btn': 'ΕΠΙΛΟΓΗ ΑΡΧΕΙΟΥ',
     'relink_info': 'Διάρκεια: {dur} | Μέγεθος: {size} MB',
     'relink_progress': 'Συνδέθηκαν {count} από {total} αρχεία',
@@ -258,9 +256,7 @@ const Map<String, Map<String, String>> translations = {
     'cancel_confirm_title': 'Cancel Analysis',
     'cancel_confirm_msg': 'Are you sure you want to cancel the analysis?',
     'relink_title': 'Missing Files',
-    'relink_msg': 'Some videos were moved or deleted. The app will try to find them automatically.',
-    'relink_searching': 'Searching: {name}',
-    'relink_failed': 'File not found automatically. Please locate it manually:',
+    'relink_msg': 'Some videos were moved or deleted. Please locate the files to continue.',
     'relink_manual_btn': 'SELECT FILE',
     'relink_info': 'Duration: {dur} | Size: {size} MB',
     'relink_progress': 'Linked {count} of {total} files',
@@ -561,14 +557,16 @@ class AppState extends ChangeNotifier {
   // --- SMART RELINK LOGIC ---
 
   Future<bool> checkFileExists(String path) async {
+    if (path.isEmpty) return false;
     if (path.startsWith('content://')) {
       try {
         const platform = MethodChannel('com.example.highlight_manager/native_picker');
         final result = await platform.invokeMethod('checkFileExists', {'path': path});
-        return result ?? true;
-      } catch (_) { 
-        // Αν λείπει η native μέθοδος, επιστρέφουμε true για να μην μπλοκάρει όλο το app
-        return true; 
+        // Αν η native μέθοδος επιστρέψει null ή false, θεωρούμε ότι το αρχείο λείπει
+        return result == true;
+      } catch (e) { 
+        debugPrint('Relink Check Error (Native): $e');
+        return false; 
       }
     }
     return File(path).existsSync();
@@ -614,7 +612,7 @@ class AppState extends ChangeNotifier {
               final targetDir = Directory('${exportDir.path}/$projId');
               if (!targetDir.existsSync()) targetDir.createSync(recursive: true);
               
-              for (String f in ['project.json', 'analysis.json', 'thumb_0.jpg', 'thumb_1.jpg', 'thumb_2.jpg', 'thumb_3.jpg']) {
+              for (String f in ['project.json', 'analysis.json', 'thumb_0.jpg', 'thumb_1.jpg', 'thumb_2.jpg', 'thumb_3.jpg', 'ffmpeg_error.txt']) {
                 final sourceFile = File('${entity.path}/$f');
                 if (sourceFile.existsSync()) sourceFile.copySync('${targetDir.path}/$f');
               }
@@ -629,7 +627,7 @@ class AppState extends ChangeNotifier {
               final targetDir = Directory('${internalDir.path}/$projId');
               if (!targetDir.existsSync()) targetDir.createSync(recursive: true);
 
-              for (String f in ['project.json', 'analysis.json', 'thumb_0.jpg', 'thumb_1.jpg', 'thumb_2.jpg', 'thumb_3.jpg']) {
+              for (String f in ['project.json', 'analysis.json', 'thumb_0.jpg', 'thumb_1.jpg', 'thumb_2.jpg', 'thumb_3.jpg', 'ffmpeg_error.txt']) {
                 final sourceFile = File('${entity.path}/$f');
                 if (sourceFile.existsSync()) sourceFile.copySync('${targetDir.path}/$f');
               }
@@ -727,6 +725,13 @@ class AppState extends ChangeNotifier {
               final returnCode = await session.getReturnCode();
               if (ReturnCode.isCancel(returnCode) || _isAnalysisCancelled) {
                 completer.completeError(Exception('Cancelled'));
+              } else if (returnCode?.isValueSuccess() != true) {
+                final logs = await session.getAllLogsAsString();
+                try {
+                  final errFile = File('${projectDir.path}/ffmpeg_error.txt');
+                  await errFile.writeAsString('CMD: $cmd\n\nLOGS:\n$logs\n\n', mode: FileMode.append);
+                } catch (_) {}
+                completer.completeError(Exception('FFmpeg failed'));
               } else {
                 completer.complete();
               }
@@ -937,6 +942,13 @@ class AppState extends ChangeNotifier {
               print('[ANALYZE] Mobile FFmpeg ολοκληρώθηκε σε ${fileStopwatch.elapsedMilliseconds}ms (Return Code: $returnCode)');
               if (ReturnCode.isCancel(returnCode) || _isAnalysisCancelled) {
                 completer.completeError(Exception('Cancelled'));
+              } else if (returnCode?.isValueSuccess() != true) {
+                final logs = await session.getAllLogsAsString();
+                try {
+                  final errFile = File('${projectDir.path}/ffmpeg_error.txt');
+                  await errFile.writeAsString('CMD: $cmd\n\nLOGS:\n$logs\n\n', mode: FileMode.append);
+                } catch (_) {}
+                completer.completeError(Exception('FFmpeg failed'));
               } else {
                 completer.complete();
               }
@@ -2498,37 +2510,70 @@ class HomeScreen extends StatelessWidget {
                   final exportDir = Directory(exportPath);
                   if (!exportDir.existsSync()) exportDir.createSync(recursive: true);
 
-                  // --- ΑΚΤΙΝΟΓΡΑΦΙΑ CACHE ---
+                  // --- EXTENDED ΑΚΤΙΝΟΓΡΑΦΙΑ CACHE ---
                   try {
-                    final tempDir = await getTemporaryDirectory();
+                    final supportDir = await getApplicationSupportDirectory();
+                    final appRoot = supportDir.parent; // Ανεβαίνουμε στο κεντρικό sandbox του Android
+                    
+                    final dirsToScan = {
+                      'APP_ROOT_SANDBOX (Τα Πάντα)': appRoot,
+                    };
+                    
+                    if (Platform.isAndroid) {
+                      final extCaches = await getExternalCacheDirectories();
+                      if (extCaches != null && extCaches.isNotEmpty) {
+                        dirsToScan['External_Root'] = extCaches.first.parent;
+                      }
+                    }
+
                     final reportFile = File('$exportPath/cache_report.txt');
                     StringBuffer sb = StringBuffer();
-                    sb.writeln('=== HIGHLIGHT MANAGER CACHE REPORT ===');
+                    sb.writeln('=== EXTENDED HIGHLIGHT MANAGER CACHE REPORT ===');
                     sb.writeln('Date: ${DateTime.now().toString()}');
                     sb.writeln('--------------------------------------');
                     
-                    int totalBytes = 0;
-                    if (tempDir.existsSync()) {
-                      final entities = tempDir.listSync(recursive: true);
-                      for (var entity in entities) {
-                        if (entity is File) {
-                          int size = entity.lengthSync();
-                          totalBytes += size;
-                          String mb = (size / (1024 * 1024)).toStringAsFixed(2);
-                          String lastMod = entity.lastModifiedSync().toString().split('.')[0];
-                          sb.writeln('FILE: ${entity.path.split(Platform.pathSeparator).last} | Μέγεθος: $mb MB | Ημ/νια: $lastMod');
-                        } else if (entity is Directory) {
-                          sb.writeln('DIR:  ${entity.path.split(Platform.pathSeparator).last}');
+                    double grandTotalMB = 0.0;
+
+                    for (var entry in dirsToScan.entries) {
+                      final name = entry.key;
+                      final dir = entry.value;
+                      sb.writeln('\n--- SCANNING: $name ---');
+                      sb.writeln('Path: ${dir.path}');
+                      int totalBytes = 0;
+                      
+                      if (dir.existsSync()) {
+                        try {
+                          final entities = dir.listSync(recursive: true);
+                          for (var entity in entities) {
+                            if (entity is File) {
+                              int size = entity.lengthSync();
+                              totalBytes += size;
+                              String mb = (size / (1024 * 1024)).toStringAsFixed(2);
+                              String lastMod = entity.lastModifiedSync().toString().split('.')[0];
+                              sb.writeln('FILE: ${entity.path.split(Platform.pathSeparator).last} | Μέγεθος: $mb MB | Ημ/νια: $lastMod');
+                            } else if (entity is Directory) {
+                              sb.writeln('DIR:  ${entity.path.split(Platform.pathSeparator).last}');
+                            }
+                          }
+                        } catch (e) {
+                          sb.writeln('Σφάλμα ανάγνωσης: $e');
                         }
+                      } else {
+                        sb.writeln('Δεν υπάρχει αυτός ο φάκελος.');
                       }
+                      
+                      double dirMB = totalBytes / (1024 * 1024);
+                      grandTotalMB += dirMB;
+                      sb.writeln('Σύνολο Φακέλου: ${dirMB.toStringAsFixed(2)} MB');
                     }
-                    sb.writeln('--------------------------------------');
-                    sb.writeln('ΣΥΝΟΛΙΚΟ ΜΕΓΕΘΟΣ CACHE: ${(totalBytes / (1024 * 1024)).toStringAsFixed(2)} MB');
+
+                    sb.writeln('\n--------------------------------------');
+                    sb.writeln('ΣΥΝΟΛΙΚΟ ΜΕΓΕΘΟΣ ΟΛΩΝ ΤΩΝ ΦΑΚΕΛΩΝ: ${grandTotalMB.toStringAsFixed(2)} MB');
                     reportFile.writeAsStringSync(sb.toString());
                   } catch (e) {
                     File('$exportPath/cache_report.txt').writeAsStringSync('Σφάλμα δημιουργίας αναφοράς: $e');
                   }
-                  // --- ΤΕΛΟΣ ΑΚΤΙΝΟΓΡΑΦΙΑΣ ---
+                  // --- ΤΕΛΟΣ EXTENDED ΑΚΤΙΝΟΓΡΑΦΙΑΣ ---
 
                   final appDir = await getApplicationDocumentsDirectory();
                   final hmDir = Directory('${appDir.path}/HighlightManager');
@@ -2539,14 +2584,16 @@ class HomeScreen extends StatelessWidget {
                       if (entity is Directory) {
                         final projectFile = File('${entity.path}/project.json');
                         if (projectFile.existsSync()) {
-                          String pName = entity.path.split(Platform.pathSeparator).last;
+                          String projId = entity.path.split(Platform.pathSeparator).last;
+                          String pName = projId;
                           try { pName = jsonDecode(projectFile.readAsStringSync())['name'] ?? pName; } catch(_) {}
-                          final safeName = pName.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
+                          String safeName = pName.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
+                          if (safeName.length > 40) safeName = safeName.substring(0, 40).trim();
                           
-                          final projectExportDir = Directory('$exportPath/$safeName');
+                          final projectExportDir = Directory('$exportPath/${safeName}_$projId');
                           if (!projectExportDir.existsSync()) projectExportDir.createSync(recursive: true);
                           
-                          for (String f in ['project.json', 'analysis.json', 'thumb_0.jpg', 'thumb_1.jpg', 'thumb_2.jpg', 'thumb_3.jpg']) {
+                          for (String f in ['project.json', 'analysis.json', 'thumb_0.jpg', 'thumb_1.jpg', 'thumb_2.jpg', 'thumb_3.jpg', 'ffmpeg_error.txt']) {
                             final sourceFile = File('${entity.path}/$f');
                             if (sourceFile.existsSync()) sourceFile.copySync('${projectExportDir.path}/$f');
                           }
@@ -2631,7 +2678,7 @@ class HomeScreen extends StatelessWidget {
                         if (!targetDir.existsSync()) targetDir.createSync(recursive: true);
 
                         File('${targetDir.path}/project.json').writeAsStringSync(jsonEncode(importedProject.toJson()));
-                        for (String f in ['analysis.json', 'thumb_0.jpg', 'thumb_1.jpg', 'thumb_2.jpg', 'thumb_3.jpg']) {
+                        for (String f in ['analysis.json', 'thumb_0.jpg', 'thumb_1.jpg', 'thumb_2.jpg', 'thumb_3.jpg', 'ffmpeg_error.txt']) {
                           final sf = File('${entity.path}/$f');
                           if (sf.existsSync()) sf.copySync('${targetDir.path}/$f');
                         }
@@ -3449,10 +3496,12 @@ class _ManualRelinkPanelState extends State<ManualRelinkPanel> {
                             }
 
                             if (newPath != null && mounted) {
-                              // Ενημέρωση UI ακαριαία: Εφόσον το διάλεξε ο χρήστης, το αρχείο υπάρχει.
+                              // Ενημέρωση UI ακαριαία
                               setState(() {
                                 widget.project.videoPaths[i] = newPath!;
-                                _fileStatus[i] = true; 
+                                _fileStatus[i] = true;
+                                // Μηδενίζουμε το feedback αντιγραφής αν υπήρχε
+                                _copiedStatus[i] = false;
                               });
 
                               while (widget.project.videoSizes.length <= i) widget.project.videoSizes.add(0);
@@ -3469,7 +3518,8 @@ class _ManualRelinkPanelState extends State<ManualRelinkPanel> {
                               } catch (_) {}
                               
                               await widget.state.saveProject(widget.project);
-                              _refreshStatus(); // Επιβεβαίωση στο παρασκήνιο
+                              // Αφαιρέθηκε η κλήση της _refreshStatus() εδώ για να μην 
+                              // ακυρώνει τη χειροκίνητη επιλογή σε περίπτωση σφάλματος του native check.
                             }
                           },
                           icon: const Icon(Icons.folder_open, size: 18),
