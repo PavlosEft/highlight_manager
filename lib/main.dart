@@ -4806,7 +4806,7 @@ class _EditorScreenState extends State<EditorScreen> {
       mainAxisSize: MainAxisSize.min,
       children: [
         videoContainer,
-        const SizedBox(height: 2),
+        const SizedBox(height: 4),
         // Line 1: Slider
         SizedBox(
           height: 10,
@@ -4815,9 +4815,9 @@ class _EditorScreenState extends State<EditorScreen> {
             builder: (context, currentPos, child) {
               return SliderTheme(
                 data: SliderTheme.of(context).copyWith(
-                  trackHeight: 3.0,
-                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6.0),
-                  overlayShape: const RoundSliderOverlayShape(overlayRadius: 12.0),
+                  trackHeight: 6.0,
+                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7.0),
+                  overlayShape: const RoundSliderOverlayShape(overlayRadius: 14.0),
                   trackShape: const RectangularSliderTrackShape(), 
                 ),
                 child: Slider(
@@ -4857,7 +4857,7 @@ class _EditorScreenState extends State<EditorScreen> {
             }
           ),
         ),
-        const SizedBox(height: 2),
+        const SizedBox(height: 6),
         // Line 2: Buttons (Compact & Oval Play)
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 0.0),
@@ -5276,7 +5276,8 @@ class _EditorScreenState extends State<EditorScreen> {
       children: [
         // --- SMART TOOLBAR ---
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 2.0),
+          height: 56.0,
+          padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
           decoration: BoxDecoration(
             color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
             border: Border(bottom: BorderSide(color: Theme.of(context).dividerColor)),
@@ -5290,31 +5291,32 @@ class _EditorScreenState extends State<EditorScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       if (showHighlightsOnly) ...[
-                        Padding(
-                          padding: const EdgeInsets.only(right: 2.0),
-                          child: IconButton(
-                            icon: const Icon(Icons.sort, size: 20),
-                            onPressed: () {
-                              setState(() {
-                                widget.project.phases.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-                              });
-                              state.saveProject(widget.project);
-                            },
-                            tooltip: 'Reset Order',
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
+                        const SizedBox(width: 4.0),
+                        Container(
+                          width: 24.0,
+                          alignment: Alignment.centerLeft,
+                          child: Tooltip(
+                            message: 'Reset Order',
+                            child: InkWell(
+                              onTap: () {
+                                setState(() {
+                                  widget.project.phases.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+                                });
+                                state.saveProject(widget.project);
+                              },
+                              borderRadius: BorderRadius.circular(4),
+                              child: const Icon(Icons.sort, size: 20),
+                            ),
                           ),
                         ),
-                        Padding(
-                          padding: const EdgeInsets.only(right: 4.0),
-                          child: SizedBox(
-                            width: 24,
-                            height: 24,
-                            child: Checkbox(
-                              visualDensity: VisualDensity.compact,
-                              value: _areAllHighlightsSelected(),
-                              onChanged: widget.project.phases.where((p) => p.isHighlight).isEmpty ? null : _toggleAllHighlights,
-                            ),
+                        const SizedBox(width: 8.0),
+                        SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: Checkbox(
+                            visualDensity: VisualDensity.compact,
+                            value: _areAllHighlightsSelected(),
+                            onChanged: widget.project.phases.where((p) => p.isHighlight).isEmpty ? null : _toggleAllHighlights,
                           ),
                         ),
                       ] else ...[
@@ -5415,14 +5417,10 @@ class _EditorScreenState extends State<EditorScreen> {
                   duration: const Duration(milliseconds: 300),
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
-                    color: showHighlightsOnly 
-                        ? Theme.of(context).colorScheme.primaryContainer.withOpacity(0.6) 
-                        : Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
+                    color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.6),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: showHighlightsOnly 
-                          ? Theme.of(context).colorScheme.primary.withOpacity(0.6) 
-                          : Colors.grey.withOpacity(0.4),
+                      color: Theme.of(context).colorScheme.primary.withOpacity(0.6),
                       width: 1.5,
                     ),
                   ),
@@ -5624,29 +5622,29 @@ class _EditorScreenState extends State<EditorScreen> {
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         if (showHighlightsOnly) ...[
-                                          ReorderableDragStartListener(
-                                            index: index,
-                                            child: const Padding(
-                                              padding: EdgeInsets.only(right: 2.0),
-                                              child: Icon(Icons.drag_indicator, color: Colors.grey, size: 20),
+                                          Container(
+                                            width: 24.0,
+                                            alignment: Alignment.centerLeft,
+                                            child: ReorderableDragStartListener(
+                                              index: index,
+                                              child: const Icon(Icons.drag_indicator, color: Colors.grey, size: 20),
                                             ),
                                           ),
+                                          const SizedBox(width: 8.0),
                                           if (phase.isHighlight)
-                                            Padding(
-                                              padding: const EdgeInsets.only(right: 4.0),
-                                              child: SizedBox(
-                                                width: 24,
-                                                height: 24,
-                                                child: Checkbox(
-                                                  visualDensity: VisualDensity.compact,
-                                                  value: phase.isSelected,
-                                                  onChanged: (v) {
-                                                    setState(() => phase.isSelected = v ?? true);
-                                                    state.saveProject(widget.project);
-                                                  },
-                                                ),
+                                            SizedBox(
+                                              width: 24,
+                                              height: 24,
+                                              child: Checkbox(
+                                                visualDensity: VisualDensity.compact,
+                                                value: phase.isSelected,
+                                                onChanged: (v) {
+                                                  setState(() => phase.isSelected = v ?? true);
+                                                  state.saveProject(widget.project);
+                                                },
                                               ),
                                             ),
+                                          const SizedBox(width: 8.0),
                                         ],
                                         // Star icon
                                         IconButton(
@@ -5753,22 +5751,23 @@ class _EditorScreenState extends State<EditorScreen> {
                                       mainAxisAlignment: MainAxisAlignment.end,
                                       children: [
                                         if (phase.isHighlight) ...[
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                            decoration: BoxDecoration(
-                                              color: Theme.of(context).colorScheme.primaryContainer,
-                                              borderRadius: BorderRadius.circular(6),
-                                              border: Border.all(color: Theme.of(context).colorScheme.primary.withOpacity(0.4), width: 1.5),
+                                          if (!isExpanded)
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: Theme.of(context).colorScheme.primaryContainer,
+                                                borderRadius: BorderRadius.circular(6),
+                                                border: Border.all(color: Theme.of(context).colorScheme.primary.withOpacity(0.4), width: 1.5),
+                                              ),
+                                              child: TweenAnimationBuilder<Color?>(
+                                                key: ValueKey(durStr),
+                                                duration: const Duration(milliseconds: 600),
+                                                tween: ColorTween(begin: Theme.of(context).colorScheme.onPrimaryContainer, end: Theme.of(context).colorScheme.primary),
+                                                builder: (context, color, child) {
+                                                  return Text(durStr, style: TextStyle(color: color, fontWeight: FontWeight.w900, fontSize: 13));
+                                                }
+                                              ),
                                             ),
-                                            child: TweenAnimationBuilder<Color?>(
-                                              key: ValueKey(durStr),
-                                              duration: const Duration(milliseconds: 600),
-                                              tween: ColorTween(begin: Theme.of(context).colorScheme.onPrimaryContainer, end: Theme.of(context).colorScheme.primary),
-                                              builder: (context, color, child) {
-                                                return Text(durStr, style: TextStyle(color: color, fontWeight: FontWeight.w900, fontSize: 13));
-                                              }
-                                            ),
-                                          ),
                                           if (isExpanded)
                                             Padding(
                                               padding: const EdgeInsets.only(left: 4.0), // Reduced gap
@@ -5804,7 +5803,7 @@ class _EditorScreenState extends State<EditorScreen> {
                                   const Divider(height: 1, thickness: 1),
                                   const SizedBox(height: 8), // Less gap
                                   Row(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment: CrossAxisAlignment.end,
                                     children: [
                                       // Left Column: START
                                       Expanded(
@@ -5830,7 +5829,18 @@ class _EditorScreenState extends State<EditorScreen> {
                                           ],
                                         ),
                                       ),
-                                      const SizedBox(width: 12),
+                                      Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 2.0),
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: Theme.of(context).colorScheme.primaryContainer,
+                                            borderRadius: BorderRadius.circular(8),
+                                            border: Border.all(color: Theme.of(context).colorScheme.primary.withOpacity(0.4), width: 1.5),
+                                          ),
+                                          child: Text(durStr, style: TextStyle(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.w900, fontSize: 13)),
+                                        ),
+                                      ),
                                       // Right Column: END
                                       Expanded(
                                         child: Column(
