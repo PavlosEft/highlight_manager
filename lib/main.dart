@@ -672,7 +672,7 @@ class AppState extends ChangeNotifier {
               final targetDir = Directory('${exportDir.path}/$projId');
               if (!targetDir.existsSync()) targetDir.createSync(recursive: true);
               
-              for (String f in ['project.json', 'analysis.json', 'thumb_0.jpg', 'thumb_1.jpg', 'thumb_2.jpg', 'thumb_3.jpg', 'ffmpeg_error.txt']) {
+              for (String f in ['project.json', 'analysis.json', 'thumb_0.jpg', 'thumb_1.jpg', 'thumb_2.jpg', 'thumb_3.jpg']) {
                 final sourceFile = File('${entity.path}/$f');
                 if (sourceFile.existsSync()) sourceFile.copySync('${targetDir.path}/$f');
               }
@@ -687,7 +687,7 @@ class AppState extends ChangeNotifier {
               final targetDir = Directory('${internalDir.path}/$projId');
               if (!targetDir.existsSync()) targetDir.createSync(recursive: true);
 
-              for (String f in ['project.json', 'analysis.json', 'thumb_0.jpg', 'thumb_1.jpg', 'thumb_2.jpg', 'thumb_3.jpg', 'ffmpeg_error.txt']) {
+              for (String f in ['project.json', 'analysis.json', 'thumb_0.jpg', 'thumb_1.jpg', 'thumb_2.jpg', 'thumb_3.jpg']) {
                 final sourceFile = File('${entity.path}/$f');
                 if (sourceFile.existsSync()) sourceFile.copySync('${targetDir.path}/$f');
               }
@@ -2682,7 +2682,7 @@ class HomeScreen extends StatelessWidget {
                           final projectExportDir = Directory('$exportPath/${safeName}_$projId');
                           if (!projectExportDir.existsSync()) projectExportDir.createSync(recursive: true);
                           
-                          for (String f in ['project.json', 'analysis.json', 'thumb_0.jpg', 'thumb_1.jpg', 'thumb_2.jpg', 'thumb_3.jpg', 'ffmpeg_error.txt']) {
+                          for (String f in ['project.json', 'analysis.json', 'thumb_0.jpg', 'thumb_1.jpg', 'thumb_2.jpg', 'thumb_3.jpg']) {
                             final sourceFile = File('${entity.path}/$f');
                             if (sourceFile.existsSync()) sourceFile.copySync('${projectExportDir.path}/$f');
                           }
@@ -2767,7 +2767,7 @@ class HomeScreen extends StatelessWidget {
                         if (!targetDir.existsSync()) targetDir.createSync(recursive: true);
 
                         File('${targetDir.path}/project.json').writeAsStringSync(jsonEncode(importedProject.toJson()));
-                        for (String f in ['analysis.json', 'thumb_0.jpg', 'thumb_1.jpg', 'thumb_2.jpg', 'thumb_3.jpg', 'ffmpeg_error.txt']) {
+                        for (String f in ['analysis.json', 'thumb_0.jpg', 'thumb_1.jpg', 'thumb_2.jpg', 'thumb_3.jpg']) {
                           final sf = File('${entity.path}/$f');
                           if (sf.existsSync()) sf.copySync('${targetDir.path}/$f');
                         }
@@ -5572,7 +5572,11 @@ class _EditorScreenState extends State<EditorScreen> {
                     if (phase.isHighlight) {
                       bgColor = isDark ? const Color(0xFF4A148C) : const Color(0xFFF3E5F5);
                     } else {
-                      bgColor = isDark ? const Color(0xFF2C2C34) : Colors.white;
+                      if (phase.isSeen && !isActive && !isLastPlayed) {
+                        bgColor = isDark ? const Color(0xFF1E1E24) : Colors.grey.shade200;
+                      } else {
+                        bgColor = isDark ? const Color(0xFF2C2C34) : Colors.white;
+                      }
                     }
 
                     Color borderColor;
@@ -5737,7 +5741,7 @@ class _EditorScreenState extends State<EditorScreen> {
                                                   left: -6, right: -6,
                                                   child: Container(
                                                     height: 2.0,
-                                                    color: Colors.grey.withOpacity(0.4),
+                                                    color: Colors.grey.withOpacity(0.65),
                                                   ),
                                                 ),
                                             ],
@@ -6259,12 +6263,8 @@ class _EditorScreenState extends State<EditorScreen> {
             } else {
               return Column(
                 children: [
-                  Flexible(
-                    flex: 2,
-                    child: _buildMobileVideoPlayer(context),
-                  ),
+                  _buildMobileVideoPlayer(context),
                   Expanded(
-                    flex: 3,
                     child: _buildSidePanel(context, state),
                   ),
                 ],
