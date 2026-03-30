@@ -24,6 +24,41 @@ class MainActivity: FlutterActivity() {
                     putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
                 }
                 startActivityForResult(intent, PICK_VIDEO_REQUEST_CODE)
+            } else if (call.method == "checkFileExists") {
+                val path = call.argument<String>("path")
+                if (path != null) {
+                    try {
+                        val uri = Uri.parse(path)
+                        contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                            result.success(cursor.moveToFirst())
+                        } ?: result.success(false)
+                    } catch (e: Exception) {
+                        result.success(false)
+                    }
+                } else {
+                    result.success(false)
+                }
+            } else if (call.method == "getFileSize") {
+                val path = call.argument<String>("path")
+                if (path != null) {
+                    try {
+                        val uri = Uri.parse(path)
+                        var size: Long? = null
+                        contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                            if (cursor.moveToFirst()) {
+                                val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                                if (sizeIndex != -1 && !cursor.isNull(sizeIndex)) {
+                                    size = cursor.getLong(sizeIndex)
+                                }
+                            }
+                        }
+                        result.success(size)
+                    } catch (e: Exception) {
+                        result.success(null)
+                    }
+                } else {
+                    result.success(null)
+                }
             } else {
                 result.notImplemented()
             }

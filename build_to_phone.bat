@@ -1,20 +1,23 @@
 @echo off
-:: Διορθώνει την εμφάνιση των emojis (UTF-8)
 chcp 65001 >nul
+setlocal
+for /f %%e in ('echo prompt $E ^| cmd') do set "ESC=%%e"
+set "GREEN=%ESC%[32m"
+set "RESET=%ESC%[0m"
 
-:: Αλλάζει το directory (cd) αυτόματα στον φάκελο που βρίσκεται το ίδιο το .bat αρχείο
 cd /d "%~dp0"
 
 title Build ^& Push to Phone
 echo ========================================================
-echo 🚀 Ksekinima Build kai metafora sto kinito...
+echo Starting Build and transfer to phone...
 echo ========================================================
 
-echo 2. Xtysimo neou APK (xoris clean gia na einai grigoro)...
+echo 1. Building new APK (No clean for speed)...
 call flutter build apk
 
-echo 3. Egkatastasi sto kinito...
+echo 2. Installing to phone...
 call flutter install
 
-echo ✅ Oloklirothike! Mporeis na vgaleis to kalodio.
+echo.
+echo %GREEN%Done! You can unplug the cable.%RESET%
 pause

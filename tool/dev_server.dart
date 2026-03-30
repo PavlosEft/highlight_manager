@@ -2,12 +2,22 @@ import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
 
+// --- ANSI Color Codes ---
+const String reset = '\x1B[0m';
+const String red = '\x1B[31m';
+const String green = '\x1B[32m';
+const String yellow = '\x1B[33m';
+const String blue = '\x1B[34m';
+const String cyan = '\x1B[36m';
+const String magenta = '\x1B[35m';
+const String bold = '\x1B[1m';
+
 // --- Global Variables ---
 List<Process> flutterProcesses = [];
 bool isQuitting = false; 
 bool isAttachReady = false;
 bool isRecovering = false;
-bool isAIWorking = false; // ΝΕΟ: Ασπίδα (Mutex) για να μην κάνει διπλό reload ο watcher
+bool isAIWorking = false; // Shield (Mutex) to prevent double reload by the watcher
 Timer? debounceTimer;
 IOSink? logSink;
 
@@ -17,19 +27,19 @@ bool isConfirmingGit = false;
 String lastClipboardText = '';
 
 void printMenu() {
-  print('\n====================================================');
-  print('⚡ HIGHLIGHT MANAGER - UNIFIED CONTROL PANEL');
-  print('====================================================');
-  print('SERVER COMMANDS:');
+  print('\n$cyan====================================================$reset');
+  print('$bold$cyan[*] HIGHLIGHT MANAGER - UNIFIED CONTROL PANEL$reset');
+  print('$cyan====================================================$reset');
+  print('$yellow SERVER COMMANDS:$reset');
   print('  [r] - Hot Reload  |  [e] - Hot Restart');
   print('  [a] - Attach      |  [b] - Build');
   print('  [x] - Clean (x)   |  [q] - Quit & Kill All');
-  print('-----------------------------------------------------');
-  print('AI PATCHER COMMANDS (Ακούει το Clipboard...):');
+  print('$cyan-----------------------------------------------------$reset');
+  print('$yellow AI PATCHER COMMANDS (Listening to Clipboard...):$reset');
   print('  [c] - Create (OK) Zip Backup');
   print('  [g] - Git Commit & Push');
-  print('  [u] - Undo (Επαναφορά προηγούμενου Backup)');
-  print('====================================================\n');
+  print('  [u] - Undo (Restore previous Backup)');
+  print('$cyan====================================================$reset\n');
 }
 
 void writeLog(String message) {
@@ -40,12 +50,12 @@ void writeLog(String message) {
 
 void cleanupAndExit() {
   isQuitting = true;
-  print('\n🧹 Τερματισμός Server... (Ο Φύλακας θα καθαρίσει τα υπόλοιπα)');
+  print('\n$yellow[*] Terminating Server... (The Watcher will clean up the rest)$reset');
   
   for (var p in flutterProcesses) p.kill();
   try { logSink?.close(); } catch (_) {}
   
-  exit(0); // Μόλις το dart κλείσει, ο Φύλακας "ξυπνάει" και τρέχει το kill_all.bat!
+  exit(0); 
 }
 
 void launchLogViewer() {
@@ -66,7 +76,7 @@ void launchLogViewer() {
 }
 
 void main() async {
-  print('⚙️ Αρχικοποίηση Smart Dev Server & AI Patcher...');
+  print('$blue[*] Initializing Smart Dev Server & AI Patcher...$reset');
   launchLogViewer();
   
   final backupDir = Directory('Backups');
@@ -86,11 +96,11 @@ void main() async {
   }
 
   if (targetDevice != 'windows' && !forceBuild) {
-    writeLog('📱 Βρέθηκε Android. Ξύπνημα εφαρμογής μέσω ADB...');
+    writeLog('[*] Android detected. Waking up app via ADB...');
     await wakeUpApp(targetDevice);
     startSmartAttach(targetDevice);
   } else {
-    writeLog('🏗️ Εκκίνηση πλήρους Build...');
+    writeLog('[*] Starting full Build...');
     await startFlutterApp();
   }
 
@@ -120,11 +130,11 @@ void main() async {
     } else if (input == 'h' || input == '?') {
       printMenu();
     } else if (input == 'x') {
-      print('\n🧹 Εκκίνηση εξωτερικού καθαρισμού...');
+      print('\n$yellow[*] Starting external cleanup...$reset');
       Process.run('cmd', ['/c', 'start', 'clean_workspace.bat'], runInShell: true);
     } else if (input == 'a') {
       if (targetDevice != 'windows') {
-        print('\n⏳ Χειροκίνητη επανασύνδεση (Attach)...');
+        print('\n$cyan[*] Manual reconnect (Attach)...$reset');
         startSmartAttach(targetDevice);
       }
     } else if (input == 'b') {
@@ -137,10 +147,10 @@ void main() async {
       createOkZip();
     } else if (input == 'g') {
       isConfirmingGit = true;
-      stdout.write('\n⚠️ [GIT] Να γίνει αυτόματο commit και push; (y/n): ');
+      stdout.write('\n$yellow[?] [GIT] Auto commit and push? (y/n): $reset');
     } else if (input == 'u') {
       isConfirmingUndo = true;
-      stdout.write('\n⚠️ [UNDO] Είσαι σίγουρος ότι θες επαναφορά στην προηγούμενη έκδοση; (y/n): ');
+      stdout.write('\n$yellow[?] [UNDO] Are you sure you want to restore to the previous version? (y/n): $reset');
     } else {
       for (var p in flutterProcesses) {
         try { p.stdin.add(event); } catch (_) {}
@@ -149,14 +159,13 @@ void main() async {
   });
 
   void handleFileSave(FileSystemEvent event) {
-    // Αν το AI κάνει δουλειά, αγνόησε τα events για να αποφύγουμε διπλό reload!
     if (isAIWorking) return;
 
     final path = event.path.replaceAll('\\', '/');
     if (path.contains('Backups') || path.endsWith('.zip')) return;
 
     debounceTimer?.cancel();
-    debounceTimer = Timer(const Duration(milliseconds: 300), () { // Αυξημένο delay για ασφάλεια
+    debounceTimer = Timer(const Duration(milliseconds: 300), () { // Increased delay for safety
       if (path.endsWith('.dart') || path.endsWith('.yaml')) {
          triggerFlutterCommand('R', 'Auto-Restart (File Save)');
       }
@@ -169,11 +178,11 @@ void main() async {
 
 void triggerFlutterCommand(String command, String actionName) {
   if (!isAttachReady) {
-    print('⏳ Η σύνδεση δεν έχει ολοκληρωθεί ακόμα! Το $actionName ακυρώθηκε.');
+    print('$red[!] Connection not established yet! $actionName cancelled.$reset');
     return;
   }
-  print('🔄 Εκτέλεση: $actionName');
-  writeLog('🔄 $actionName triggered...');
+  print('$cyan[*] Executing: $actionName$reset');
+  writeLog('[*] $actionName triggered...');
   for (var p in flutterProcesses) {
     try { p.stdin.writeln(command); } catch (_) {}
   }
@@ -191,8 +200,7 @@ Future<void> wakeUpApp(String device) async {
   await Process.run('adb', ['-s', device, 'forward', '--remove-all'], runInShell: true);
   await Process.run('adb', ['-s', device, 'shell', 'am', 'force-stop', 'com.example.highlight_manager'], runInShell: true);
   
-  // Καθαρισμός με Debugging: Καταγραφή σε Αρχείο
-  print('\n[DEBUG] Στέλνω εντολή διαγραφής (Καταγραφή σε αρχείο)...');
+  print('\n$cyan[DEBUG] Sending delete command (Logging to file)...$reset');
   final result = await Process.run('adb', ['-s', device, 'shell', 'run-as com.example.highlight_manager rm -rf highlight_manager*'], runInShell: true);
   
   try {
@@ -204,7 +212,7 @@ Future<void> wakeUpApp(String device) async {
   } catch (_) {}
   
   await Process.run('adb', ['-s', device, 'shell', 'am', 'start', '-n', 'com.example.highlight_manager/.MainActivity'], runInShell: true);
-  await Future.delayed(const Duration(seconds: 3)); // Δίνουμε χρόνο να ανοίξει η εφαρμογή
+  await Future.delayed(const Duration(seconds: 3)); 
 }
 
 void startSmartAttach(String device) async {
@@ -214,25 +222,23 @@ void startSmartAttach(String device) async {
   for (var oldP in flutterProcesses) oldP.kill();
   flutterProcesses.clear();
 
-  writeLog('🔌 Ενεργοποίηση Attach...');
+  writeLog('[*] Activating Attach...');
   final p = await Process.start('flutter', ['attach', '-d', device, '--no-version-check'], runInShell: true);
   flutterProcesses.add(p);
   
   p.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen((line) {
     if (line.contains('Syncing files to device') && !isAttachReady) {
       isAttachReady = true;
-      writeLog('✅ Η σύνδεση ολοκληρώθηκε!');
-      print('\n✅ [ΕΤΟΙΜΟ] Η σύνδεση ολοκληρώθηκε! Αυτόματος συγχρονισμός κώδικα...');
+      writeLog('[OK] Connection completed!');
+      print('\n$green[OK] [READY] Connection completed! Auto-syncing code...$reset');
       
-      // ΛΥΣΗ 1: Περιμένουμε 2.5 δευτερόλεπτα και στέλνουμε 'R' (Hot Restart) 
-      // για να φορτώσει ολόφρεσκος ο κώδικας και να μην βλέπεις την παλιά έκδοση.
       Future.delayed(const Duration(milliseconds: 2500), () {
         triggerFlutterCommand('R', 'Initial Attach Sync (Hot Restart)');
       });
     }
     
     if (line.contains('Lost connection to device') || line.contains('Application dead')) {
-      writeLog('🚨 CRASH ΑΝΙΧΝΕΥΤΗΚΕ: $line');
+      writeLog('[ERROR] CRASH DETECTED: $line');
       handleCrashRecovery(device);
     } else {
       writeLog(line);
@@ -242,7 +248,7 @@ void startSmartAttach(String device) async {
   p.exitCode.then((code) {
     isAttachReady = false;
     if (!isQuitting && !isRecovering) {
-      writeLog('⚠️ Το attach τερμάτισε απροσδόκητα (Exit code: $code).');
+      writeLog('[WARNING] Attach terminated unexpectedly (Exit code: $code).');
       handleCrashRecovery(device);
     }
   });
@@ -252,8 +258,8 @@ void handleCrashRecovery(String device) async {
   if (isRecovering || isQuitting) return;
   isRecovering = true;
   
-  print('\n🚨 Ανιχνεύτηκε Crash! Εκκίνηση Auto-Recovery...');
-  writeLog('🔄 AUTO-RECOVERY: Εκκίνηση διαδικασίας ανάκτησης...');
+  print('\n$bold$red[ERROR] Crash Detected! Starting Auto-Recovery...$reset');
+  writeLog('[*] AUTO-RECOVERY: Starting recovery process...');
   
   for (var p in flutterProcesses) p.kill();
   flutterProcesses.clear();
@@ -264,7 +270,7 @@ void handleCrashRecovery(String device) async {
 }
 
 Future<void> startFlutterApp() async {
-  writeLog('🔍 Προετοιμασία εκκίνησης Build...');
+  writeLog('[*] Preparing to start Build...');
   String targetDevice = await detectDevice();
   
   final p = await Process.start('flutter', ['run', '--no-enable-impeller', '-d', targetDevice], runInShell: true);
@@ -272,10 +278,9 @@ Future<void> startFlutterApp() async {
   
   p.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen((line) {
     writeLog(line);
-    // ΛΥΣΗ 2: Όταν το πλήρες build τελειώσει και συγχρονίσει, "ξεκλειδώνουμε" τον server
     if (line.contains('Syncing files to device') || line.contains('To hot reload changes')) {
       isAttachReady = true;
-      print('\n✅ [ΕΤΟΙΜΟ] Το Build ολοκληρώθηκε! Ο Server "ξεκλείδωσε".');
+      print('\n$green[OK] [READY] Build completed! Server "unlocked".$reset');
     }
   });
   
@@ -292,26 +297,24 @@ void scheduleClipboardCheck() {
       
       if (rawData.contains('<HM_PATCH>') && !rawData.contains('//[HM_SEEN]')) {
         playDetectSound();
-        print('\n⏳ AI Patch Detected...');
+        print('\n$cyan[*] AI Patch Detected...$reset');
         
-        isAIWorking = true; // ΚΛΕΙΔΩΜΑ WATCHER
+        isAIWorking = true; // WATCHER LOCK
         
         bool success = applyPatch(rawData);
         playSound(success);
         
         if (success) {
-          print('✅ Patch Εφαρμόστηκε! Creating snapshot...');
+          print('$green[OK] Patch Applied! Creating snapshot...$reset');
           await createCurrentZip(); 
 
-
-          // Ξεκλείδωμα watcher με μικρή καθυστέρηση για να προλάβει το σύστημα αρχείων
           Timer(const Duration(milliseconds: 1500), () {
             isAIWorking = false;
             triggerFlutterCommand('R', 'AI Auto-Restart');
           });
         } else {
           isAIWorking = false;
-          print('❌ Patch Failed!');
+          print('$red[ERROR] Patch Failed!$reset');
         }
 
         try {
@@ -377,7 +380,7 @@ bool applyPatch(String rawClipboard) {
 
         final file = File(filename);
         if (!file.existsSync()) {
-          print('❌ Σφάλμα: Δεν βρέθηκε το αρχείο $filename.');
+          print('$red[ERROR] File $filename not found.$reset');
           return false;
         }
 
@@ -393,7 +396,7 @@ bool applyPatch(String rawClipboard) {
           if (newFileContents[filename]!.contains(trimmedOldCode)) {
             newFileContents[filename] = newFileContents[filename]!.replaceFirst(trimmedOldCode, newCode.trim());
           } else {
-            print('❌ Σφάλμα: Δεν βρέθηκε ο κώδικας στο $filename.');
+            print('$red[ERROR] Code block not found in $filename.$reset');
             return false;
           }
         }
@@ -406,26 +409,24 @@ bool applyPatch(String rawClipboard) {
     return true;
 
   } catch (e) {
-    print('❌ Απρόσμενο Σφάλμα στο Patcher: $e');
+    print('$red[ERROR] Unexpected Error in Patcher: $e$reset');
   }
   return false; 
 }
 
-
-
 Future<void> createCurrentZip() async {
-  print('\n📦 Auto-Zip: Εκτέλεση εξωτερικού script...');
+  print('\n$cyan[*] Auto-Zip: Executing external script...$reset');
   await Process.run('cmd', ['/c', 'zip_source_code.bat'], runInShell: true);
 }
 
 Future<void> createOkZip() async {
-  print('\n⏳ Δημιουργία Μόνιμου (OK) Snapshot μέσω εξωτερικού script...');
+  print('\n$cyan[*] Creating Permanent (OK) Snapshot via external script...$reset');
   await Process.run('cmd', ['/c', 'zip_source_code.bat', 'OK'], runInShell: true);
 }
 
 void handleUndoConfirmation(String input) async {
   if (input == 'y') {
-    print('\n⏳ Εκκίνηση Επαναφοράς (Undo)...');
+    print('\n$cyan[*] Starting Restore (Undo)...$reset');
     for (var file in Directory('.').listSync()) {
       if (file is File && file.path.contains('SourceCode_') && file.path.endsWith('.zip') && !file.path.contains('(OK)')) {
         file.deleteSync();
@@ -434,7 +435,7 @@ void handleUndoConfirmation(String input) async {
 
     final backupFiles = Directory('Backups').listSync().where((f) => f.path.endsWith('.zip') && !f.path.contains('(OK)')).toList();
     if (backupFiles.isEmpty) {
-      print('❌ Δεν βρέθηκαν backups.');
+      print('$red[ERROR] No backups found.$reset');
     } else {
       backupFiles.sort((a, b) => a.statSync().modified.compareTo(b.statSync().modified));
       final lastZip = backupFiles.last as File;
@@ -450,22 +451,25 @@ void handleUndoConfirmation(String input) async {
           }
         }
       }
-      print('Η επαναφορά ολοκληρώθηκε! (Αρχείο: $fileName)');
+      print('$green[OK] Restore completed! (File: $fileName)$reset');
       triggerFlutterCommand('R', 'Undo Restart');
     }
   } else {
-    print('\n🚫 Το Undo ακυρώθηκε.');
+    print('\n$red[!] Undo cancelled.$reset');
   }
   isConfirmingUndo = false;
 }
 
 void handleGitConfirmation(String input) async {
   if (input == 'y') {
-    print('\n⏳ Εκτέλεση Git Push...');
+    print('\n$cyan[*] Executing Git Push...$reset');
     await Process.run('git', ['add', '.'], runInShell: true);
     await Process.run('git', ['commit', '-m', 'Auto commit from Unified Panel'], runInShell: true); 
     final pushResult = await Process.run('git', ['push'], runInShell: true);
-    if (pushResult.exitCode == 0) print('✅ [GIT] Επιτυχία!');
+    if (pushResult.exitCode == 0) print('$green[OK] [GIT] Success!$reset');
+    else print('$red[ERROR] [GIT] Push failed.$reset');
+  } else {
+    print('\n$red[!] Git operation cancelled.$reset');
   }
   isConfirmingGit = false;
 }
