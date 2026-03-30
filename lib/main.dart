@@ -241,6 +241,9 @@ const Map<String, Map<String, String>> translations = {
     'exp_final_montage': 'Τελικό μοντάζ (σχεδόν έτοιμο!)...',
     'exp_done': 'Ολοκληρώθηκε!',
     'exp_err': 'Σφάλμα: ',
+    'exp_warn_p1': '⚠️ Αν τα ',
+    'exp_warn_bold': 'αρχικά βίντεο ή η τοποθεσία εξαγωγής',
+    'exp_warn_p2': ' βρίσκονται σε εξωτερικό μέσο (SD/USB), η διαδικασία θα διαρκέσει περισσότερο.',
   },
   'en': {
     'title': 'Highlight Manager',
@@ -327,7 +330,10 @@ const Map<String, Map<String, String>> translations = {
     'exp_process_scene': 'Processing scene {i} of {total}...',
     'exp_final_montage': 'Final montage (almost done!)...',
     'exp_done': 'Completed!',
-    'exp_err': 'Error: '
+    'exp_err': 'Error: ',
+    'exp_warn_p1': '⚠️ If the ',
+    'exp_warn_bold': 'source videos or the export location',
+    'exp_warn_p2': ' are on an external drive (SD/USB), the process will take longer.'
   }
 };
 
@@ -2896,6 +2902,10 @@ class _ExportSettingsDialogState extends State<ExportSettingsDialog> {
     final state = Provider.of<AppState>(context, listen: false);
     final title = widget.mode == 'join' ? state.t('export_join_title') : state.t('export_clips_title');
     return AlertDialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 24.0),
+      titlePadding: const EdgeInsets.only(left: 20.0, right: 20.0, top: 20.0, bottom: 12.0),
+      contentPadding: const EdgeInsets.only(left: 20.0, right: 20.0, top: 0.0, bottom: 8.0),
+      actionsPadding: const EdgeInsets.only(right: 16.0, bottom: 12.0),
       title: FittedBox(
         fit: BoxFit.scaleDown,
         alignment: Alignment.centerLeft,
@@ -2906,12 +2916,32 @@ class _ExportSettingsDialogState extends State<ExportSettingsDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            CheckboxListTile(
-              title: Text(state.t('export_compress')),
-              subtitle: Text(state.t('export_compress_sub')),
+            Container(
+              padding: const EdgeInsets.all(12),
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.tertiaryContainer.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Theme.of(context).colorScheme.tertiary.withOpacity(0.5)),
+              ),
+              child: RichText(
+                text: TextSpan(
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 13),
+                  children: [
+                    TextSpan(text: state.t('exp_warn_p1')),
+                    TextSpan(text: state.t('exp_warn_bold'), style: const TextStyle(fontWeight: FontWeight.bold)),
+                    TextSpan(text: state.t('exp_warn_p2')),
+                  ],
+                ),
+              ),
+            ),
+            SwitchListTile(
+              title: Text(state.t('export_compress'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              subtitle: Text(state.t('export_compress_sub'), style: const TextStyle(fontSize: 12)),
               value: compress,
-              onChanged: (v) => setState(() => compress = v ?? false),
+              onChanged: (v) => setState(() => compress = v),
               contentPadding: EdgeInsets.zero,
+              activeColor: Theme.of(context).colorScheme.primary,
             ),
             if (widget.mode == 'join') ...[
               const Divider(),
