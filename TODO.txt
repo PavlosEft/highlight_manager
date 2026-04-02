@@ -2,18 +2,42 @@
 
 
 
+
+
+
+
+
+to export!!! 
+Να δοκιμάσω το export σύμφωνα με αυτή τη συνομιλία next step είναι τα μηνύματα που βγαίνουν στο παραθυράκι και το transition
+Έχω βγάλει 2 βίντεο ένα από το κανονικό και ένα από το compress να τα ελέγξω
+https://gemini.google.com/app/4f4b61293a37634f
+
+complete complete Εμφανίζεται δύο φορές
+να δω τι θα κάνω σε περίπτωση που η πηγή του βίντεο είναι είτε ίδια βίντεο 
+|με ίδιες διαστάσεις είναι απλώς ένα βίντεο η πηγή
++ tranzition!!!
+Να δω αν θα κάνω το compress optional έχω εδώ αντίστοιχη συνομιλία 
+https://gemini.google.com/app/b94fe455345d4d4e?_gl=1*1102ra6*_gcl_au*MTUwMTk5MTc5OS4xNzY0NDQ5ODk3*_ga*MzU3OTk5MTUwLjE3NjQ0NDk4MzU.*_ga_WC57KJ50ZZ*czE3NjQ0NDk4MzUkbzEkZzEkdDE3NjQ0NTA5NzEkajUxJGwwJGgw
+να δω τι θα κάνω με τον player στο review για να διαλέξω βίντεο έχω εδώ συνομιλία
+https://gemini.google.com/app/8704ab4d27775c16
+
+
 καθαρισμός cash! -> είμαστε στη φάση που προσπαθούμε να διαβάσουμε ότι έχει μέσα h cash
  και γιατί κάθε φορά που ανοίγω την εφαρμογή μεγαλώνει κι άλλο
 https://gemini.google.com/app/c46e79eb6b7aeda5
 
-to export!!!  καλύτερη ανάλυση μικρότερα αρχεία
-Αποθήκευση τελευταίου φακέλου Export: Το Python θυμάται τον φάκελο που έκανες export την τελευταία φορά (μέσω QSettings). 
-Στο Flutter πρέπει να τον επιλέγεις από την αρχή κάθε φορά.
-
-όταν μετακινείται η μπάρα του βίντεο και πατάμε επόμενο tottenham πηγαίνει στην αμέσως επόμενη πιο κοντινή φάση από τη στιγμή που έχει σταματήσει η μπάρα
-
 να δω αν μπορώ να βελτιώσω την ανάλυση δίνοντας κάποιο project που έχει όπως τα έχω βρει εγώ
- gemini και να μου προτείνει ανάλυση που να τα βρίσκει  καλύτερα
+ gemini και να μου προτείνει ανάλυση που να τα βρίσκει  καλύτερα & :
+omadopoihsh apanalamvanomenes faseis
+https://gemini.google.com/app/4f6e73f6e05fbe1f
+
+notifications analize & export
+
+να σβήνονται από εσωτερικά αυτά που γίνονται backup στο json export 
+κρατιούνται αυτά τα αρχεία με τα errors  εσωτερικά
+
+apotelesma review gia adunamies sto project -> na to ksanakanw me stoxevmeno promt
+https://gemini.google.com/app/ca6b049a0758ab8b
 
 η οθόνη να μένει ανοιχτή μόλις το συνδέω και όταν κάνει ανάλυση και όταν κάνει export 
 
@@ -31,9 +55,8 @@ to export!!!  καλύτερη ανάλυση μικρότερα αρχεία
  θέλουμε να κάνουμε τις ρυθμίσεις όπως ήταν αμέσως πριν λίγο
  Σύστημα Undo/Redo: Το Python διαθέτει πλήρες σύστημα αναιρέσεων (history_stack, redo_stack, action_stack) με αντίστοιχα κουμπιά για να παίρνεις πίσω ενέργειες (π.χ. όταν μεταφέρεις μια φάση κατά λάθος στα Highlights). Το Flutter δεν έχει undo/redo.
 
-
-omadopoihsh apanalamvanomenes faseis
-https://gemini.google.com/app/4f6e73f6e05fbe1f
+Δημιουργία αρχείου IPA στο Flutter
+https://gemini.google.com/app/5f6159b541f67c8e?_gl=1*1102ra6*_gcl_au*MTUwMTk5MTc5OS4xNzY0NDQ5ODk3*_ga*MzU3OTk5MTUwLjE3NjQ0NDk4MzU.*_ga_WC57KJ50ZZ*czE3NjQ0NDk4MzUkbzEkZzEkdDE3NjQ0NTA5NzEkajUxJGwwJGgw
 
 να μπορώ να αλλάζω γενικά το zoom πόσο μεγάλα πόσο μικρά να φαίνονται τα εικονίδια 
 

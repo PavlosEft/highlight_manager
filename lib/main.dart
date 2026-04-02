@@ -15,6 +15,7 @@ import 'package:flutter/services.dart';
 import 'dart:math' as math;
 import 'package:window_manager/window_manager.dart';
 import 'package:disk_space_plus/disk_space_plus.dart';
+import 'package:wechat_assets_picker/wechat_assets_picker.dart';
 
 // ==========================================
 // 1. DATA MODELS (Our data)
@@ -244,6 +245,14 @@ const Map<String, Map<String, String>> translations = {
     'exp_warn_p1': '⚠️ Αν τα ',
     'exp_warn_bold': 'αρχικά βίντεο ή η τοποθεσία εξαγωγής',
     'exp_warn_p2': ' βρίσκονται σε εξωτερικό μέσο (SD/USB), η διαδικασία θα διαρκέσει περισσότερο.',
+    'picker_confirm': 'ΟΚ',
+    'picker_cancel': 'Ακύρωση',
+    'picker_empty': 'Δεν βρέθηκαν βίντεο',
+    'picker_select': 'Επιλογή',
+    'picker_unsupported': 'Μη υποστηριζόμενος τύπος',
+    'picker_settings': 'Μετάβαση ρυθμίσεων',
+    'picker_access_tip': 'Πρόσβαση μόνο σε επιλεγμένα. Μεταβείτε στις ρυθμίσεις.',
+    'picker_view_all': 'Προβολή όλων',
   },
   'en': {
     'title': 'Highlight Manager',
@@ -333,7 +342,15 @@ const Map<String, Map<String, String>> translations = {
     'exp_err': 'Error: ',
     'exp_warn_p1': '⚠️ If the ',
     'exp_warn_bold': 'source videos or the export location',
-    'exp_warn_p2': ' are on an external drive (SD/USB), the process will take longer.'
+    'exp_warn_p2': ' are on an external drive (SD/USB), the process will take longer.',
+    'picker_confirm': 'OK',
+    'picker_cancel': 'Cancel',
+    'picker_empty': 'No videos found',
+    'picker_select': 'Select',
+    'picker_unsupported': 'Unsupported type',
+    'picker_settings': 'Go to Settings',
+    'picker_access_tip': 'App can only access selected assets. Go to settings.',
+    'picker_view_all': 'View all'
   }
 };
 
@@ -1557,6 +1574,262 @@ class _ProcessingDialogState extends State<ProcessingDialog> {
   }
 }
 
+class LocalizedAssetPickerTextDelegate extends EnglishAssetPickerTextDelegate {
+  final String confirmText;
+  final String cancelText;
+  final String emptyListText;
+  final String selectText;
+  final String unSupportedAssetTypeText;
+  final String goToSystemSettingsText;
+  final String accessAllTipText;
+  final String viewAllText;
+
+  const LocalizedAssetPickerTextDelegate({
+    required this.confirmText,
+    required this.cancelText,
+    required this.emptyListText,
+    required this.selectText,
+    required this.unSupportedAssetTypeText,
+    required this.goToSystemSettingsText,
+    required this.accessAllTipText,
+    required this.viewAllText,
+  });
+
+  @override
+  String get confirm => confirmText;
+  
+  @override
+  String get cancel => cancelText;
+  
+  @override
+  String get emptyList => emptyListText;
+  
+  @override
+  String get select => selectText;
+  
+  @override
+  String get unSupportedAssetType => unSupportedAssetTypeText;
+  
+  @override
+  String get goToSystemSettings => goToSystemSettingsText;
+  
+  @override
+  String get accessAllTip => accessAllTipText;
+  
+  @override
+  String get viewAll => viewAllText;
+}
+
+class HmVideoPickerDelegate extends DefaultAssetPickerBuilderDelegate {
+  HmVideoPickerDelegate({
+    required super.provider,
+    required super.initialPermission,
+    super.gridCount = 3,
+    required super.pickerTheme,
+    super.textDelegate,
+  });
+
+  @override
+  Widget previewButton(BuildContext context) {
+    return const SizedBox.shrink();
+  }
+
+  @override
+  Widget confirmButton(BuildContext context) {
+    final bool hasAssets = provider.selectedAssets.isNotEmpty;
+    return GestureDetector(
+      onTap: hasAssets ? () => Navigator.of(context).pop(provider.selectedAssets) : null,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        margin: const EdgeInsets.only(right: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: hasAssets ? Colors.purpleAccent : Colors.grey.shade800,
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (hasAssets) ...[
+              Text(
+                '${provider.selectedAssets.length}',
+                style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+              const SizedBox(width: 8),
+            ],
+            Icon(Icons.check, color: hasAssets ? Colors.black : Colors.grey.shade500, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Future<void> viewAsset(
+    BuildContext context,
+    int? index,
+    AssetEntity currentAsset,
+  ) async {
+     await Navigator.of(context).push(
+       MaterialPageRoute(
+         builder: (context) => MiniPreviewScreen(
+           asset: currentAsset,
+           provider: provider,
+         ),
+       ),
+     );
+  }
+}
+
+class MiniPreviewScreen extends StatefulWidget {
+  final AssetEntity asset;
+  final DefaultAssetPickerProvider provider;
+  const MiniPreviewScreen({super.key, required this.asset, required this.provider});
+  @override
+  State<MiniPreviewScreen> createState() => _MiniPreviewScreenState();
+}
+
+class _MiniPreviewScreenState extends State<MiniPreviewScreen> {
+  late final Player player;
+  late final VideoController controller;
+  bool isReady = false;
+
+  @override
+  void initState() {
+    super.initState();
+    player = Player();
+    controller = VideoController(player);
+    _initPlayer();
+  }
+
+  Future<void> _initPlayer() async {
+    final file = await widget.asset.file;
+    if (file != null) {
+      await player.open(Media(file.path), play: true);
+      if (mounted) setState(() => isReady = true);
+    }
+  }
+
+  @override
+  void dispose() {
+    player.dispose();
+    super.dispose();
+  }
+
+  String _formatDuration(Duration d) {
+    int m = d.inMinutes.remainder(60);
+    int s = d.inSeconds.remainder(60);
+    return "${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}";
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
+        actions: [
+          AnimatedBuilder(
+            animation: widget.provider,
+            builder: (context, _) {
+              final isSelected = widget.provider.selectedAssets.contains(widget.asset);
+              return Padding(
+                padding: const EdgeInsets.only(right: 16.0),
+                child: Center(
+                  child: InkWell(
+                    onTap: () {
+                      if (isSelected) {
+                        widget.provider.unSelectAsset(widget.asset);
+                      } else {
+                        widget.provider.selectAsset(widget.asset);
+                      }
+                    },
+                    child: Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: isSelected ? Theme.of(context).colorScheme.primary : Colors.transparent,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 1.5),
+                      ),
+                      child: isSelected ? const Icon(Icons.check, size: 18, color: Colors.white) : null,
+                    ),
+                  ),
+                ),
+              );
+            }
+          )
+        ],
+      ),
+      body: isReady 
+          ? Column(
+              children: [
+                 Expanded(
+                   child: GestureDetector(
+                     onTap: () => player.playOrPause(),
+                     child: Video(controller: controller, controls: NoVideoControls),
+                   ),
+                 ),
+                 Container(
+                   color: Colors.black,
+                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                   child: SafeArea(
+                     top: false,
+                     child: Row(
+                       children: [
+                         StreamBuilder<bool>(
+                           stream: player.stream.playing,
+                           builder: (context, snap) {
+                              final isPlaying = snap.data ?? true;
+                              return IconButton(
+                                icon: Icon(isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.white),
+                                onPressed: () => player.playOrPause(),
+                              );
+                           }
+                         ),
+                         Expanded(
+                           child: StreamBuilder<Duration>(
+                             stream: player.stream.position,
+                             builder: (context, snap) {
+                                final pos = snap.data ?? Duration.zero;
+                                final max = player.state.duration.inMilliseconds.toDouble();
+                                return Row(
+                                  children: [
+                                    Text(_formatDuration(pos), style: const TextStyle(color: Colors.white, fontSize: 12)),
+                                    Expanded(
+                                      child: SliderTheme(
+                                        data: SliderTheme.of(context).copyWith(
+                                          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                                          overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                                        ),
+                                        child: Slider(
+                                          value: pos.inMilliseconds.toDouble().clamp(0.0, max > 0 ? max : 1.0),
+                                          max: max > 0 ? max : 1.0,
+                                          onChanged: (v) => player.seek(Duration(milliseconds: v.toInt())),
+                                          activeColor: Theme.of(context).colorScheme.primary,
+                                          inactiveColor: Colors.white30,
+                                        ),
+                                      ),
+                                    ),
+                                    Text(_formatDuration(player.state.duration), style: const TextStyle(color: Colors.white, fontSize: 12)),
+                                  ],
+                                );
+                             }
+                           ),
+                         ),
+                       ]
+                     ),
+                   )
+                 )
+              ]
+            )
+          : const Center(child: CircularProgressIndicator(color: Colors.white)),
+    );
+  }
+}
+
 class NewProjectDialog extends StatefulWidget {
   final AppState state;
   const NewProjectDialog({super.key, required this.state});
@@ -1615,27 +1888,44 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
           final thumbDir = Directory('${tempDir.path}/hm_temp_thumbs');
           if (await thumbDir.exists()) await thumbDir.delete(recursive: true);
         } catch (_) {}
-      } else if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
-        // TODO: Will be implemented later when Desktop is tested (Cleanup hm_temp_thumbs BEFORE selection)
-      }
-
-      if (Platform.isAndroid) {
-        final List<dynamic>? result = await platform.invokeListMethod('pickVideos');
+        
+        final PermissionState ps = await AssetPicker.permissionCheck();
+        final DefaultAssetPickerProvider provider = DefaultAssetPickerProvider(
+          maxAssets: 100,
+          requestType: RequestType.video,
+        );
+        final HmVideoPickerDelegate delegate = HmVideoPickerDelegate(
+          provider: provider,
+          initialPermission: ps,
+          gridCount: 3,
+          pickerTheme: AssetPicker.themeData(Theme.of(context).colorScheme.primary),
+        );
+        
+        final List<AssetEntity>? result = await AssetPicker.pickAssetsWithDelegate(
+          context,
+          delegate: delegate,
+        );
+        
         if (result != null && result.isNotEmpty) {
-          setState(() {
-            for (var item in result) {
-              final map = Map<String, String>.from(item);
-              final path = map['path']!;
-              final name = map['name']!;
+          for (var asset in result) {
+            final File? file = await asset.file;
+            if (file != null) {
+              final path = file.path;
+              final name = asset.title ?? path.split(Platform.pathSeparator).last;
               if (!_selectedPaths.contains(path)) {
-                _selectedPaths.add(path);
-                _pathNames[path] = name;
+                setState(() {
+                  _selectedPaths.add(path);
+                  _pathNames[path] = name;
+                });
               }
             }
+          }
+          setState(() {
             _updateAutoName();
           });
         }
       } else {
+        // Desktop platforms
         FilePickerResult? result = await FilePicker.platform.pickFiles(
           type: FileType.video,
           allowMultiple: true,
@@ -3230,6 +3520,7 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
         // TODO: Will be implemented later when Desktop is tested (Cleanup orphaned temp_ folders BEFORE export)
       }
 
+      List<String> finalExportPaths = [];
       final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
       Directory tempDir;
       if (Platform.isAndroid || Platform.isIOS) {
@@ -3242,16 +3533,119 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
       await tempDir.create(recursive: true);
 
       final isCompress = widget.config['compress'] as bool;
+      final transPath = widget.mode == 'join' ? widget.config['trans_path'] as String : '';
       
+      double targetFps = 30.0;
+      int targetWidth = 0;
+      int targetHeight = 0;
+
+      Set<String> involvedPaths = {};
+      for (var phase in widget.highlights) {
+        final ts = phase.timestamp;
+        final cStart = phase.customStartOffset ?? widget.startOffset;
+        final startGlobal = math.max(0.0, ts - cStart);
+        involvedPaths.add(_getLocalVideoData(startGlobal).path);
+      }
+
+      bool isUniform = true;
+      double? refFps;
+      int? refWidth;
+      int? refHeight;
+      int? refRotation;
+      
+      setState(() => status = "Analyzing source media...");
+      for (String path in involvedPaths) {
+        if (isCancelled) throw Exception('Cancelled');
+        double currentFps = 30.0;
+        int currentWidth = 0;
+        int currentHeight = 0;
+        int currentRotation = 0;
+        String logs = "";
+        
+        if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+          final ffmpegExe = await _getDesktopFFmpegPath();
+          final res = await Process.run(ffmpegExe, ['-i', path]);
+          logs = res.stderr.toString();
+        } else {
+          String safePath = path;
+          if (Platform.isAndroid && path.startsWith('content://')) {
+            try {
+              final saf = await FFmpegKitConfig.getSafParameterForRead(path);
+              if (saf != null) safePath = saf;
+            } catch (_) {}
+          }
+          final session = await FFmpegKit.execute("-i \"$safePath\"");
+          logs = (await session.getAllLogsAsString()) ?? "";
+        }
+        
+        final fpsMatch = RegExp(r"(\d+(?:\.\d+)?)\s+fps").firstMatch(logs);
+        if (fpsMatch != null) currentFps = double.tryParse(fpsMatch.group(1)!) ?? 30.0;
+        
+        final dimMatch = RegExp(r"(\d{3,})x(\d{3,})").firstMatch(logs);
+        if (dimMatch != null) {
+          currentWidth = int.tryParse(dimMatch.group(1)!) ?? 0;
+          currentHeight = int.tryParse(dimMatch.group(2)!) ?? 0;
+        }
+        
+        if (logs.contains('rotate          : 90') || logs.contains('rotation of 90')) {
+          currentRotation = 90;
+        } else if (logs.contains('rotate          : 270') || logs.contains('rotation of -90')) {
+          currentRotation = 270;
+        } else if (logs.contains('rotate          : 180') || logs.contains('rotation of 180')) {
+          currentRotation = 180;
+        }
+
+        if (refFps == null) {
+          refFps = currentFps;
+          refWidth = currentWidth;
+          refHeight = currentHeight;
+          refRotation = currentRotation;
+        } else {
+          if ((refFps - currentFps).abs() > 0.5 || refWidth != currentWidth || refHeight != currentHeight || refRotation != currentRotation) {
+            isUniform = false;
+          }
+        }
+        
+        int w = currentWidth;
+        int h = currentHeight;
+        if (currentRotation == 90 || currentRotation == 270) {
+          int temp = w; w = h; h = temp;
+        }
+        
+        if (w > targetWidth) targetWidth = w;
+        if (h > targetHeight) targetHeight = h;
+        if (currentFps > targetFps) targetFps = currentFps;
+      }
+      
+      if (targetWidth == 0) targetWidth = 1920;
+      if (targetHeight == 0) targetHeight = 1080;
+      
+      int maxDim = math.max(targetWidth, targetHeight);
+      if (maxDim > 1920) {
+         double scale = 1920.0 / maxDim;
+         targetWidth = (targetWidth * scale).round();
+         targetHeight = (targetHeight * scale).round();
+      }
+      
+      if (targetWidth % 2 != 0) targetWidth++; 
+      if (targetHeight % 2 != 0) targetHeight++; 
+
+      bool useFastPath = isUniform && !isCompress && transPath.isEmpty;
+      print('[EXPORT] Uniform Check: isUniform=$isUniform, FastPath=$useFastPath (Compress: $isCompress, Trans: $transPath)');
+
       List<String> videoParams;
-      if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-        videoParams = isCompress 
-            ? ['-c:v', 'libx265', '-crf', '26', '-preset', 'medium', '-tag:v', 'hvc1']
-            : ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23'];
+      if (useFastPath) {
+        videoParams = ['-c:v', 'copy'];
       } else {
-        videoParams = isCompress 
-            ? ['-c:v', 'mpeg4', '-q:v', '10']
-            : ['-c:v', 'mpeg4', '-q:v', '2'];
+        if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+          videoParams = isCompress 
+              ? ['-c:v', 'libx265', '-crf', '26', '-preset', 'medium', '-tag:v', 'hvc1']
+              : ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23'];
+        } else {
+          videoParams = isCompress 
+              ? ['-c:v', 'mpeg4', '-q:v', '10', '-maxrate', '8M', '-bufsize', '12M', '-video_track_timescale', '90000']
+              : ['-c:v', 'mpeg4', '-q:v', '2', '-maxrate', '25M', '-bufsize', '35M', '-video_track_timescale', '90000'];
+        }
       }
 
       if (widget.mode == 'separate') {
@@ -3273,10 +3667,18 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
           final tempOutPath = '${tempDir.path}/clip_${i + 1}.mp4';
           final finalOutPath = '${clipsDir.path}/clip_${i + 1}.mp4';
 
-          final args = [
-            '-y', '-ss', localData.localSeconds.toStringAsFixed(3), '-i', localData.path, '-t', dur.toString(),
-            ...videoParams, '-c:a', 'aac', tempOutPath
-          ];
+          List<String> args;
+          if (useFastPath) {
+            args = [
+              '-y', '-ss', localData.localSeconds.toStringAsFixed(3), '-i', localData.path, '-t', dur.toString(),
+              ...videoParams, '-c:a', 'aac', '-ar', '48000', '-ac', '2', '-af', 'aresample=async=1', tempOutPath
+            ];
+          } else {
+            args = [
+              '-y', '-ss', localData.localSeconds.toStringAsFixed(3), '-i', localData.path, '-t', dur.toString(),
+              '-vsync', '1', ...videoParams, '-c:a', 'aac', '-ar', '48000', '-ac', '2', '-af', 'aresample=async=1', tempOutPath
+            ];
+          }
           
           final code = await _runFFmpeg(args, stepDuration: dur);
           if (isCancelled) throw Exception('Cancelled');
@@ -3286,28 +3688,31 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
           
           try {
             await File(tempOutPath).copy(finalOutPath);
+            finalExportPaths.add(finalOutPath);
           } catch (e) {
             throw Exception('Failed to save in folder: $e');
           }
         }
       } else {
         List<String> processedClips = [];
-        final transPath = widget.config['trans_path'] as String;
         final transDur = widget.config['trans_dur'] as double;
         String transTemp = '';
 
-        if (transPath.isNotEmpty) {
+        if (transPath.isNotEmpty && !useFastPath) {
           setState(() => status = widget.state.t('exp_trans_eff'));
           transTemp = '${tempDir.path}/trans.mp4';
           final isImage = transPath.toLowerCase().endsWith('.jpg') || transPath.toLowerCase().endsWith('.png');
           
+          final filterStr = 'scale=$targetWidth:$targetHeight:force_original_aspect_ratio=decrease,pad=$targetWidth:$targetHeight:(ow-iw)/2:(oh-ih)/2';
+
           List<String> trArgs = ['-y'];
           if (isImage) trArgs.addAll(['-loop', '1']);
           trArgs.addAll([
             '-i', transPath,
-            '-vf', 'scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080',
+            '-vf', filterStr,
+            '-r', targetFps.toStringAsFixed(2),
             '-t', transDur.toString(),
-            ...videoParams, '-c:a', 'aac', '-f', 'mp4', transTemp
+            ...videoParams, '-c:a', 'aac', '-ar', '48000', '-ac', '2', '-f', 'mp4', transTemp
           ]);
           final trCode = await _runFFmpeg(trArgs, stepDuration: transDur);
           if (isCancelled) throw Exception('Cancelled');
@@ -3329,10 +3734,23 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
           final dur = cStart + cEnd + 0.5;
           final clipTemp = '${tempDir.path}/part_$i.mp4';
 
-          final args = [
-            '-y', '-ss', localData.localSeconds.toStringAsFixed(3), '-i', localData.path, '-t', dur.toString(),
-            ...videoParams, '-c:a', 'aac', '-vf', 'scale=1920:1080', clipTemp
-          ];
+          List<String> args;
+          if (useFastPath) {
+            args = [
+              '-y', '-ss', localData.localSeconds.toStringAsFixed(3), '-i', localData.path, '-t', dur.toString(),
+              ...videoParams, '-c:a', 'aac', '-ar', '48000', '-ac', '2', '-af', 'aresample=async=1', clipTemp
+            ];
+          } else {
+            final filterStr = 'scale=$targetWidth:$targetHeight:force_original_aspect_ratio=decrease,pad=$targetWidth:$targetHeight:(ow-iw)/2:(oh-ih)/2';
+            args = [
+              '-y', '-ss', localData.localSeconds.toStringAsFixed(3), '-i', localData.path, '-t', dur.toString(),
+              '-vsync', '1', ...videoParams, 
+              '-c:a', 'aac', '-ar', '48000', '-ac', '2', '-af', 'aresample=async=1', 
+              '-r', targetFps.toStringAsFixed(2),
+              '-vf', filterStr, 
+              clipTemp
+            ];
+          }
           final code = await _runFFmpeg(args, stepDuration: dur);
           if (isCancelled) throw Exception('Cancelled');
           if (code != 0) throw Exception('FFmpeg error');
@@ -3363,7 +3781,7 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
         final mergedOutFinal = '${widget.outDir}/${widget.project.name}_merged_$timestamp.mp4';
         
         final catArgs = [
-          '-y', '-f', 'concat', '-safe', '0', '-i', listFile.path, '-c', 'copy', mergedOutTemp
+          '-y', '-fflags', '+genpts', '-f', 'concat', '-safe', '0', '-i', listFile.path, '-c', 'copy', mergedOutTemp
         ];
         final code = await _runFFmpeg(catArgs);
         if (isCancelled) throw Exception('Cancelled');
@@ -3371,6 +3789,7 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
         
         try {
           await File(mergedOutTemp).copy(mergedOutFinal);
+          finalExportPaths.add(mergedOutFinal);
         } catch (e) {
           throw Exception('Failed to save in folder: $e');
         }
@@ -3378,6 +3797,16 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
       }
 
       if (isCancelled) throw Exception('Cancelled');
+      
+      if (Platform.isAndroid) {
+        try {
+          const platform = MethodChannel('com.example.highlight_manager/native_picker');
+          for (String path in finalExportPaths) {
+            await platform.invokeMethod('scanFile', {'path': path});
+          }
+        } catch (_) {}
+      }
+
       setState(() {
         status = widget.state.t('exp_done');
         progress = 1.0;
