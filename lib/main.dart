@@ -1644,7 +1644,7 @@ class HmVideoPickerDelegate extends DefaultAssetPickerBuilderDelegate {
         margin: const EdgeInsets.only(right: 16),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(
-          color: hasAssets ? Colors.purpleAccent : Colors.grey.shade800,
+          color: hasAssets ? const Color(0xFF4A148C) : Colors.grey.shade800,
           borderRadius: BorderRadius.circular(24),
         ),
         child: Row(
@@ -1653,11 +1653,11 @@ class HmVideoPickerDelegate extends DefaultAssetPickerBuilderDelegate {
             if (hasAssets) ...[
               Text(
                 '${provider.selectedAssets.length}',
-                style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 16),
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
               ),
               const SizedBox(width: 8),
             ],
-            Icon(Icons.check, color: hasAssets ? Colors.black : Colors.grey.shade500, size: 20),
+            Icon(Icons.check, color: hasAssets ? Colors.white : Colors.grey.shade500, size: 20),
           ],
         ),
       ),
@@ -1750,7 +1750,7 @@ class _MiniPreviewScreenState extends State<MiniPreviewScreen> {
                       width: 28,
                       height: 28,
                       decoration: BoxDecoration(
-                        color: isSelected ? Theme.of(context).colorScheme.primary : Colors.transparent,
+                        color: isSelected ? const Color(0xFF4A148C) : Colors.transparent,
                         shape: BoxShape.circle,
                         border: Border.all(color: Colors.white, width: 1.5),
                       ),
@@ -1898,7 +1898,17 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
           provider: provider,
           initialPermission: ps,
           gridCount: 3,
-          pickerTheme: AssetPicker.themeData(Theme.of(context).colorScheme.primary),
+          pickerTheme: AssetPicker.themeData(const Color(0xFF4A148C)),
+          textDelegate: LocalizedAssetPickerTextDelegate(
+            confirmText: widget.state.t('picker_confirm'),
+            cancelText: widget.state.t('picker_cancel'),
+            emptyListText: widget.state.t('picker_empty'),
+            selectText: widget.state.t('picker_select'),
+            unSupportedAssetTypeText: widget.state.t('picker_unsupported'),
+            goToSystemSettingsText: widget.state.t('picker_settings'),
+            accessAllTipText: widget.state.t('picker_access_tip'),
+            viewAllText: widget.state.t('picker_view_all'),
+          ),
         );
         
         final List<AssetEntity>? result = await AssetPicker.pickAssetsWithDelegate(
