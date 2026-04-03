@@ -228,7 +228,7 @@ const Map<String, Map<String, String>> translations = {
     'sync_restore_err': '❌ Σφάλμα Εισαγωγής: ',
     'export_join_title': 'Εξαγωγή Video (Join)',
     'export_clips_title': 'Εξαγωγή Clips',
-    'export_compress': 'Συμπίεση H.265 (Small Size)',
+    'export_compress': 'Compression',
     'export_compress_sub': 'Μειώνει το μέγεθος αρχείου. Η εξαγωγή θα διαρκέσει περισσότερο.',
     'export_trans': 'Transition (Προαιρετικό)',
     'export_trans_hint': 'Εικόνα ή Video...',
@@ -326,7 +326,7 @@ const Map<String, Map<String, String>> translations = {
     'sync_restore_err': '❌ Import Error: ',
     'export_join_title': 'Export Video (Join)',
     'export_clips_title': 'Export Clips',
-    'export_compress': 'H.265 Compression (Small Size)',
+    'export_compress': 'Compression',
     'export_compress_sub': 'Reduces file size. Export will take longer.',
     'export_trans': 'Transition (Optional)',
     'export_trans_hint': 'Image or Video...',
@@ -3235,25 +3235,41 @@ class _ExportSettingsDialogState extends State<ExportSettingsDialog> {
                 ),
               ),
             ),
-            SwitchListTile(
-              title: Text(state.t('export_compress'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-              subtitle: Text(state.t('export_compress_sub'), style: const TextStyle(fontSize: 12)),
-              value: compress,
-              onChanged: (v) => setState(() => compress = v),
-              contentPadding: EdgeInsets.zero,
-              activeColor: Theme.of(context).colorScheme.primary,
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(state.t('export_compress'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      const SizedBox(height: 4),
+                      Text(state.t('export_compress_sub'), style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                    ],
+                  ),
+                ),
+                Switch(
+                  value: compress,
+                  onChanged: (v) => setState(() => compress = v),
+                  activeColor: Theme.of(context).colorScheme.primary,
+                ),
+              ],
             ),
             if (widget.mode == 'join') ...[
-              const Divider(),
-              Text(state.t('export_trans'), style: const TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
+              const Divider(height: 32),
+              Text(state.t('export_trans'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              const SizedBox(height: 4),
               Row(
                 children: [
                   Expanded(
-                    child: Text(transPath.isEmpty ? state.t('export_trans_hint') : transPath.split(RegExp(r'[\\/]')).last, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    child: Text(
+                      transPath.isEmpty ? state.t('export_trans_hint') : transPath.split(RegExp(r'[\\/]')).last, 
+                      maxLines: 1, 
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.folder_open),
+                    icon: const Icon(Icons.folder_open, size: 28),
                     onPressed: () async {
                       final res = await FilePicker.platform.pickFiles(
                         type: FileType.media,
