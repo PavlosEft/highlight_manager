@@ -16,6 +16,7 @@ import 'dart:math' as math;
 import 'package:window_manager/window_manager.dart';
 import 'package:disk_space_plus/disk_space_plus.dart';
 import 'package:wechat_assets_picker/wechat_assets_picker.dart';
+import 'package:gal/gal.dart';
 
 // ==========================================
 // 1. DATA MODELS (Our data)
@@ -226,11 +227,13 @@ const Map<String, Map<String, String>> translations = {
     'sync_replace': 'ΑΝΤΙΚΑΤΑΣΤΑΣΗ',
     'sync_restore_success': '✅ Εισαγωγή {count} Projects ολοκληρώθηκε!',
     'sync_restore_err': '❌ Σφάλμα Εισαγωγής: ',
-    'export_join_title': 'Εξαγωγή Video (Join)',
+    'export_btn_join': 'Μαζί',
+    'export_btn_separate': 'Ξεχωριστά',
+    'export_join_title': 'Εξαγωγή Βίντεο',
     'export_clips_title': 'Εξαγωγή Clips',
-    'export_compress': 'Compression',
+    'export_compress': 'Συμπίεση',
     'export_compress_sub': 'Μειώνει το μέγεθος αρχείου. Η εξαγωγή θα διαρκέσει περισσότερο.',
-    'export_trans': 'Transition (Προαιρετικό)',
+    'export_trans': 'Ενδιάμεσο Εφέ (Προαιρετικό)',
     'export_trans_hint': 'Εικόνα ή Video...',
     'export_dur': 'Διάρκεια:',
     'export_btn': 'ΕΞΑΓΩΓΗ',
@@ -253,6 +256,21 @@ const Map<String, Map<String, String>> translations = {
     'picker_settings': 'Μετάβαση ρυθμίσεων',
     'picker_access_tip': 'Πρόσβαση μόνο σε επιλεγμένα. Μεταβείτε στις ρυθμίσεις.',
     'picker_view_all': 'Προβολή όλων',
+    'exp_analyze_media': 'Ανάλυση αρχείων...',
+    'close_btn': 'ΚΛΕΙΣΙΜΟ',
+    'hint_high_p1': 'Swipe ',
+    'hint_high_p2': ' στο βίντεο ή ',
+    'hint_high_p3': ' για νέα Highlights!',
+    'hint_pool_p1': 'Άλλαξε την ευαισθησία από ',
+    'hint_pool_p2': ' για περισσότερες φάσεις!',
+    'settings_title': 'Ρυθμίσεις',
+    'sensitivity_label': 'Ευαισθησία:',
+    'grouping_label': 'Ομαδοποίηση:',
+    'start_offset_label': 'Έναρξη πριν:',
+    'end_offset_label': 'Λήξη μετά:',
+    'autoplay_label': 'Αυτόματη Αναπαραγωγή',
+    'skip_seen_label': 'Παράβλεψη Προβληθέντων',
+    'ok_btn': 'ΟΚ'
   },
   'en': {
     'title': 'Highlight Manager',
@@ -324,7 +342,9 @@ const Map<String, Map<String, String>> translations = {
     'sync_replace': 'REPLACE',
     'sync_restore_success': '✅ Import of {count} Projects completed!',
     'sync_restore_err': '❌ Import Error: ',
-    'export_join_title': 'Export Video (Join)',
+    'export_btn_join': 'Join',
+    'export_btn_separate': 'Separate',
+    'export_join_title': 'Export Video',
     'export_clips_title': 'Export Clips',
     'export_compress': 'Compression',
     'export_compress_sub': 'Reduces file size. Export will take longer.',
@@ -350,7 +370,22 @@ const Map<String, Map<String, String>> translations = {
     'picker_unsupported': 'Unsupported type',
     'picker_settings': 'Go to Settings',
     'picker_access_tip': 'App can only access selected assets. Go to settings.',
-    'picker_view_all': 'View all'
+    'picker_view_all': 'View all',
+    'exp_analyze_media': 'Analyzing source media...',
+    'close_btn': 'CLOSE',
+    'hint_high_p1': 'Swipe ',
+    'hint_high_p2': ' on video or ',
+    'hint_high_p3': ' for new Highlights!',
+    'hint_pool_p1': 'Adjust sensitivity from ',
+    'hint_pool_p2': ' for more phases!',
+    'settings_title': 'Settings',
+    'sensitivity_label': 'Sensitivity:',
+    'grouping_label': 'Grouping:',
+    'start_offset_label': 'Start Offset:',
+    'end_offset_label': 'End Offset:',
+    'autoplay_label': 'Autoplay',
+    'skip_seen_label': 'Skip Seen',
+    'ok_btn': 'OK'
   }
 };
 
@@ -1391,7 +1426,7 @@ class _ExistingAnalysisDialogState extends State<ExistingAnalysisDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(widget.state.t('preparation'), style: const TextStyle(fontWeight: FontWeight.bold)),
+      title: Text(widget.state.t('analyze_prompt_title'), style: const TextStyle(fontWeight: FontWeight.bold)),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1501,7 +1536,7 @@ class _ProcessingDialogState extends State<ProcessingDialog> {
       title: FittedBox(
         fit: BoxFit.scaleDown,
         alignment: Alignment.centerLeft,
-        child: Text(widget.state.t('preparation'), style: const TextStyle(fontWeight: FontWeight.bold)),
+        child: Text(widget.state.t('analyze_prompt_title'), style: const TextStyle(fontWeight: FontWeight.bold)),
       ),
       content: SizedBox(
         width: isDesktop ? 400 : MediaQuery.of(context).size.width,
@@ -1858,6 +1893,10 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
     final minute = now.minute.toString().padLeft(2, '0');
     final second = now.second.toString().padLeft(2, '0');
     _nameController = TextEditingController(text: '$day-$month-$year at $hour.$minute.$second');
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _pickFiles();
+    });
   }
 
   @override
@@ -2099,7 +2138,7 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
             children: [
             TextField(
               controller: _nameController,
-              autofocus: true,
+              autofocus: false,
               minLines: 1,
               maxLines: 4,
               keyboardType: TextInputType.multiline,
@@ -3205,7 +3244,7 @@ class _ExportSettingsDialogState extends State<ExportSettingsDialog> {
       insetPadding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 24.0),
       titlePadding: const EdgeInsets.only(left: 20.0, right: 20.0, top: 20.0, bottom: 12.0),
       contentPadding: const EdgeInsets.only(left: 20.0, right: 20.0, top: 0.0, bottom: 8.0),
-      actionsPadding: const EdgeInsets.only(right: 16.0, bottom: 12.0),
+      actionsPadding: const EdgeInsets.only(right: 16.0, bottom: 16.0, top: 28.0),
       title: FittedBox(
         fit: BoxFit.scaleDown,
         alignment: Alignment.centerLeft,
@@ -3256,20 +3295,41 @@ class _ExportSettingsDialogState extends State<ExportSettingsDialog> {
             ),
             if (widget.mode == 'join') ...[
               const Divider(height: 32),
-              Text(state.t('export_trans'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-              const SizedBox(height: 4),
               Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Expanded(
-                    child: Text(
-                      transPath.isEmpty ? state.t('export_trans_hint') : transPath.split(RegExp(r'[\\/]')).last, 
-                      maxLines: 1, 
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(state.t('export_trans'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        const SizedBox(height: 4),
+                        Text(
+                          transPath.isEmpty ? state.t('export_trans_hint') : transPath.split(RegExp(r'[\\/]')).last, 
+                          maxLines: 1, 
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12, 
+                            color: transPath.isEmpty ? Colors.grey : Theme.of(context).colorScheme.primary,
+                            fontWeight: transPath.isEmpty ? FontWeight.normal : FontWeight.bold,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
+                  const SizedBox(width: 8),
+                  if (transPath.isNotEmpty)
+                    IconButton(
+                      icon: const Icon(Icons.clear, color: Colors.red),
+                      onPressed: () => setState(() => transPath = ''),
+                    ),
                   IconButton(
-                    icon: const Icon(Icons.folder_open, size: 28),
+                    iconSize: 28,
+                    style: IconButton.styleFrom(
+                      backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
+                      padding: const EdgeInsets.all(12),
+                    ),
+                    icon: Icon(Icons.folder_open, color: Theme.of(context).colorScheme.primary),
                     onPressed: () async {
                       final res = await FilePicker.platform.pickFiles(
                         type: FileType.media,
@@ -3284,11 +3344,6 @@ class _ExportSettingsDialogState extends State<ExportSettingsDialog> {
                       }
                     },
                   ),
-                  if (transPath.isNotEmpty)
-                    IconButton(
-                      icon: const Icon(Icons.clear, color: Colors.red),
-                      onPressed: () => setState(() => transPath = ''),
-                    ),
                 ],
               ),
               if (transPath.isNotEmpty) ...[
@@ -3579,7 +3634,7 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
       int? refHeight;
       int? refRotation;
       
-      setState(() => status = "Analyzing source media...");
+      setState(() => status = widget.state.t('exp_analyze_media'));
       for (String path in involvedPaths) {
         if (isCancelled) throw Exception('Cancelled');
         double currentFps = 30.0;
@@ -3824,13 +3879,20 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
 
       if (isCancelled) throw Exception('Cancelled');
       
-      if (Platform.isAndroid) {
+      if (Platform.isAndroid || Platform.isIOS) {
         try {
-          const platform = MethodChannel('com.example.highlight_manager/native_picker');
           for (String path in finalExportPaths) {
-            await platform.invokeMethod('scanFile', {'path': path});
+            await Gal.putVideo(path);
+            // Διαγραφή του τελικού αρχείου από την Cache αφού μπήκε στο Gallery
+            try { await File(path).delete(); } catch (_) {}
           }
-        } catch (_) {}
+          if (widget.mode == 'separate') {
+            // Διαγραφή του temporary clips folder από την Cache
+            try { await Directory('${widget.outDir}/${widget.project.name}_clips_$timestamp').delete(recursive: true); } catch (_) {}
+          }
+        } catch (e) {
+          debugPrint('Gallery save error: $e');
+        }
       }
 
       setState(() {
@@ -3864,7 +3926,7 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
       title: FittedBox(
         fit: BoxFit.scaleDown,
         alignment: Alignment.centerLeft,
-        child: Text(isFinished ? widget.state.t('exp_done') : widget.state.t('exp_start'), style: const TextStyle(fontWeight: FontWeight.bold)),
+        child: Text(widget.mode == 'join' ? widget.state.t('export_join_title') : widget.state.t('export_clips_title'), style: const TextStyle(fontWeight: FontWeight.bold)),
       ),
       content: SizedBox(
         width: isDesktop ? 400 : MediaQuery.of(context).size.width,
@@ -3913,7 +3975,7 @@ class _ExportProgressDialogState extends State<ExportProgressDialog> {
         else
           FilledButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('CLOSE'),
+            child: Text(widget.state.t('close_btn')),
           ),
       ],
     );
@@ -5451,7 +5513,7 @@ class _EditorScreenState extends State<EditorScreen> {
       Widget buildSensitivity() => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Sensitivity: ${tempSensitivity.toInt()}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+          Text('${state.t('sensitivity_label')} ${tempSensitivity.toInt()}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
           SliderTheme(
             data: SliderTheme.of(ctx).copyWith(trackShape: const RectangularSliderTrackShape()),
             child: Slider(
@@ -5470,7 +5532,7 @@ class _EditorScreenState extends State<EditorScreen> {
       Widget buildGrouping() => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Grouping: ${tempGrouping.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+          Text('${state.t('grouping_label')} ${tempGrouping.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
           SliderTheme(
             data: SliderTheme.of(ctx).copyWith(trackShape: const RectangularSliderTrackShape()),
             child: Slider(
@@ -5499,7 +5561,7 @@ class _EditorScreenState extends State<EditorScreen> {
               Stack(
                 alignment: Alignment.center,
                 children: [
-                  const Center(child: Text('Settings', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
+                  Center(child: Text(state.t('settings_title'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
                   Positioned(
                     right: 0,
                     child: Container(
@@ -5545,7 +5607,7 @@ class _EditorScreenState extends State<EditorScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Start Offset: ${startOffset.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                        Text('${state.t('start_offset_label')} ${startOffset.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                         SliderTheme(
                           data: SliderTheme.of(ctx).copyWith(trackShape: const RectangularSliderTrackShape()),
                           child: Slider(
@@ -5569,7 +5631,7 @@ class _EditorScreenState extends State<EditorScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('End Offset: ${endOffset.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                        Text('${state.t('end_offset_label')} ${endOffset.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                         SliderTheme(
                           data: SliderTheme.of(ctx).copyWith(trackShape: const RectangularSliderTrackShape()),
                           child: Slider(
@@ -5591,10 +5653,13 @@ class _EditorScreenState extends State<EditorScreen> {
                   ),
                 ],
               ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              Wrap(
+                alignment: WrapAlignment.start,
+                spacing: 16.0,
+                runSpacing: 4.0,
                 children: [
                   Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Checkbox(visualDensity: VisualDensity.compact, value: autoplay, onChanged: (v) {
                         setModalState(() => autoplay = v ?? false);
@@ -5604,10 +5669,11 @@ class _EditorScreenState extends State<EditorScreen> {
                         });
                         state.saveProject(widget.project);
                       }),
-                      const Text('Autoplay', style: TextStyle(fontSize: 12)),
+                      Text(state.t('autoplay_label'), style: const TextStyle(fontSize: 12)),
                     ],
                   ),
                   Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Checkbox(visualDensity: VisualDensity.compact, value: skipSeen, onChanged: (v) {
                         setModalState(() => skipSeen = v ?? false);
@@ -5617,7 +5683,7 @@ class _EditorScreenState extends State<EditorScreen> {
                         });
                         state.saveProject(widget.project);
                       }),
-                    const Text('Skip Seen', style: TextStyle(fontSize: 12)),
+                      Text(state.t('skip_seen_label'), style: const TextStyle(fontSize: 12)),
                     ],
                   ),
                 ],
@@ -5627,9 +5693,9 @@ class _EditorScreenState extends State<EditorScreen> {
                 width: double.infinity,
                 child: FilledButton(
                   onPressed: () => Navigator.pop(context),
-                  child: const Text(
-                    'OK', 
-                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+                  child: Text(
+                    state.t('ok_btn'), 
+                    style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
                   ),
                 ),
               ),
@@ -5726,6 +5792,32 @@ class _EditorScreenState extends State<EditorScreen> {
   Widget _buildSidePanel(BuildContext context, AppState state) {
     final phases = _filteredPhases;
     final chronologicalPhases = widget.project.phases.toList()..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
+    Widget buildHint() {
+      final color = Theme.of(context).colorScheme.onSurface.withOpacity(0.5);
+      return Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: RichText(
+          textAlign: TextAlign.center,
+          text: TextSpan(
+            style: TextStyle(color: color, fontSize: 13, height: 1.5),
+            children: showHighlightsOnly
+              ? [
+                  TextSpan(text: state.t('hint_high_p1')),
+                  WidgetSpan(alignment: PlaceholderAlignment.middle, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 2), child: Icon(Icons.swipe_right, size: 16, color: color))),
+                  TextSpan(text: state.t('hint_high_p2')),
+                  WidgetSpan(alignment: PlaceholderAlignment.middle, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 2), child: Icon(Icons.star, size: 16, color: color))),
+                  TextSpan(text: state.t('hint_high_p3')),
+                ]
+              : [
+                  TextSpan(text: state.t('hint_pool_p1')),
+                  WidgetSpan(alignment: PlaceholderAlignment.middle, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 2), child: Icon(Icons.settings, size: 16, color: color))),
+                  TextSpan(text: state.t('hint_pool_p2')),
+                ],
+          ),
+        ),
+      );
+    }
 
     return Column(
       children: [
@@ -5996,10 +6088,11 @@ class _EditorScreenState extends State<EditorScreen> {
           child: isLoadingAnalysis
             ? const Center(child: CircularProgressIndicator())
             : phases.isEmpty 
-              ? Center(child: Text('No phases found', style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5))))
+              ? Center(child: buildHint())
               : ReorderableListView.builder(
                   scrollController: _listScrollController,
                   buildDefaultDragHandles: false,
+                  footer: buildHint(),
                   onReorder: (oldIndex, newIndex) {
                     if (!showHighlightsOnly) return;
                     setState(() {
@@ -6357,24 +6450,44 @@ class _EditorScreenState extends State<EditorScreen> {
                       Expanded(
                         child: FilledButton(
                           style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFF2563EB), 
-                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            backgroundColor: Theme.of(context).colorScheme.primary, 
+                            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                           ),
                           onPressed: () => _showExportDialog(context, 'join'),
-                          child: const Text('Export Video', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.download, size: 16),
+                              const SizedBox(width: 2),
+                              const Icon(Icons.movie, size: 16),
+                              const SizedBox(width: 4),
+                              Flexible(child: Text(state.t('export_btn_join'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12), overflow: TextOverflow.ellipsis)),
+                            ],
+                          ),
                         ),
                       ),
                       const SizedBox(width: 4),
                       Expanded(
                         child: FilledButton(
                           style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFF0D9488), 
-                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            backgroundColor: Theme.of(context).colorScheme.primary, 
+                            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                           ),
                           onPressed: () => _showExportDialog(context, 'separate'),
-                          child: const Text('Export Clips', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.download, size: 16),
+                              const SizedBox(width: 2),
+                              const Icon(Icons.content_cut, size: 16),
+                              const SizedBox(width: 2),
+                              const Icon(Icons.video_library, size: 16),
+                              const SizedBox(width: 4),
+                              Flexible(child: Text(state.t('export_btn_separate'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12), overflow: TextOverflow.ellipsis)),
+                            ],
+                          ),
                         ),
                       ),
                     ],
@@ -6496,8 +6609,15 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   Future<void> _runExport(Map<String, dynamic> config, String mode, List<HighlightPhase> highlights) async {
-    final outDir = await FilePicker.platform.getDirectoryPath(dialogTitle: 'Select Save Folder');
-    if (outDir == null) return;
+    String outDir = '';
+    if (Platform.isAndroid || Platform.isIOS) {
+      final tempDir = await getTemporaryDirectory();
+      outDir = tempDir.path;
+    } else {
+      final selectedDir = await FilePicker.platform.getDirectoryPath(dialogTitle: 'Select Save Folder');
+      if (selectedDir == null) return;
+      outDir = selectedDir;
+    }
 
     if (!mounted) return;
     showDialog(

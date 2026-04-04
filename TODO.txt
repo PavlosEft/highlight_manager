@@ -6,21 +6,32 @@
 
 
 
+notifications analize & export
 
 to export!!! 
-complete complete Εμφανίζεται δύο φορές
+preview meta to export!
+
+to export!!!
 + tranzition!!!
+
+σε ποια σημεία χρησιμοποιούμε το θέμα του κινητού
+https://gemini.google.com/app/95ed50921efb4cb9 
 
 καθαρισμός cash! -> είμαστε στη φάση που προσπαθούμε να διαβάσουμε ότι έχει μέσα h cash
  και γιατί κάθε φορά που ανοίγω την εφαρμογή μεγαλώνει κι άλλο
 https://gemini.google.com/app/c46e79eb6b7aeda5
+
+user data mege8os..?
+
+to koubi debbuging
+
+
 
 να δω αν μπορώ να βελτιώσω την ανάλυση δίνοντας κάποιο project που έχει όπως τα έχω βρει εγώ
  gemini και να μου προτείνει ανάλυση που να τα βρίσκει  καλύτερα & :
 omadopoihsh apanalamvanomenes faseis
 https://gemini.google.com/app/4f6e73f6e05fbe1f
 
-notifications analize & export
 
 να σβήνονται από εσωτερικά αυτά που γίνονται backup στο json export 
 κρατιούνται αυτά τα αρχεία με τα errors  εσωτερικά

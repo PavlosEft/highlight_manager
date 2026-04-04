@@ -21,6 +21,7 @@ dependencies:
   window_manager: ^0.4.3
   disk_space_plus: ^0.2.6
   wechat_assets_picker: ^9.0.2
+  gal: ^2.3.0
 
 dev_dependencies:
   flutter_test:
